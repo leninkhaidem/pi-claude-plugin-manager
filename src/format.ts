@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { claudePluginEntriesForCwd } from "./discovery.js";
 import { stateDir } from "./state.js";
-import type { State } from "./types.js";
+import type { MarketplacePluginListing, MarketplacePluginListingResult, State } from "./types.js";
 
 export function formatHelp(): string {
 	return `# /plugin — Claude Code marketplace plugin manager for Pi
@@ -24,12 +24,21 @@ ${stateDir()}
 /plugin marketplace add <github-owner/repo | git-url | local-path[#ref]>
 /plugin marketplace update [marketplace]
 /plugin marketplace remove <marketplace>
+/plugin marketplace browse [marketplace]
+/plugin browse [marketplace]
 /plugin install <plugin[@marketplace]> [--project]
-/plugin update [plugin[@marketplace]]
+/plugin update [plugin[@marketplace]]      # refreshes marketplaces before updating plugins
 /plugin enable <plugin[@marketplace]>
 /plugin disable <plugin[@marketplace]>
 /plugin uninstall <plugin[@marketplace]> [--project|--all]
 /plugin reload
+
+## Browse marketplaces
+/plugin browse
+/plugin browse <marketplace>
+/plugin marketplace browse <marketplace>
+
+Use Tab in the Pi TUI after /plugin to autocomplete subcommands, marketplace names, plugin specs, config keys, and valid flags.
 
 ## Current adapter coverage
 Loaded into Pi: Claude plugin skills and command markdown files from both Pi-managed installs and read-only Claude Code installs in ~/.claude/plugins.
@@ -53,6 +62,60 @@ export function formatMarketplaceList(state: State): string {
 			return `- ${record.name}\n  source: ${source}\n  path: ${record.path}${desc}`;
 		}),
 	].join("\n");
+}
+
+function quoteCommandArg(value: string): string {
+	if (/^[^\s"'\\]+$/.test(value)) return value;
+	return `'${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
+}
+
+function formatBrowsePlugin(plugin: MarketplacePluginListing): string {
+	const metadata = [
+		plugin.version ? `version: ${plugin.version}` : undefined,
+		plugin.category ? `category: ${plugin.category}` : undefined,
+		plugin.keywords?.length ? `keywords: ${plugin.keywords.join(", ")}` : undefined,
+	].filter(Boolean);
+	const suffix = metadata.length > 0 ? ` (${metadata.join("; ")})` : "";
+	const installLine = plugin.installSpec
+		? `  install: /plugin install ${quoteCommandArg(plugin.installSpec)}`
+		: `  not installable: ${plugin.nonInstallableReason ?? "ambiguous plugin spec"}`;
+	return [
+		`- ${plugin.displaySpec}${suffix}`,
+		plugin.description ? `  ${plugin.description}` : undefined,
+		installLine,
+	].filter(Boolean).join("\n");
+}
+
+export function formatBrowseList(result: MarketplacePluginListingResult, requestedMarketplace?: string): string {
+	if (result.marketplaces.length === 0) return "No marketplaces added. Use `/plugin marketplace add <source>`, then `/plugin browse`.";
+
+	const lines: string[] = ["# Browse Claude plugin marketplaces", ""];
+	if (requestedMarketplace) lines.push(`Marketplace: ${requestedMarketplace}`, "");
+	lines.push(`Found ${result.plugins.length} plugin${result.plugins.length === 1 ? "" : "s"} across ${result.marketplaces.length} marketplace${result.marketplaces.length === 1 ? "" : "s"}.`);
+
+	if (result.diagnostics.length > 0) {
+		lines.push("", "## Marketplace warnings");
+		for (const diagnostic of result.diagnostics) lines.push(`- ${diagnostic.marketplace}: ${diagnostic.message}`);
+	}
+
+	if (result.plugins.length === 0) {
+		lines.push("", requestedMarketplace ? "No plugins found in this marketplace." : "No plugins found. Use `/plugin marketplace add <source>` to add a marketplace with plugins.");
+		return lines.join("\n");
+	}
+
+	const grouped = new Map<string, MarketplacePluginListing[]>();
+	for (const plugin of result.plugins) {
+		const group = grouped.get(plugin.marketplace) ?? [];
+		group.push(plugin);
+		grouped.set(plugin.marketplace, group);
+	}
+
+	for (const [marketplace, plugins] of [...grouped.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+		lines.push("", `## ${marketplace} (${plugins.length})`);
+		for (const plugin of plugins) lines.push(formatBrowsePlugin(plugin));
+	}
+
+	return lines.join("\n");
 }
 
 export async function formatPluginList(state: State, cwd: string): Promise<string> {

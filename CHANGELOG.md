@@ -11,6 +11,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Claude plugin hooks are not executed yet.
 - Claude plugin MCP servers, LSP servers, monitors, agents, and plugin settings are not imported yet.
 
+## [0.2.0] - 2026-04-24
+
+### Added
+
+- Marketplace browsing with `/plugin browse [marketplace]` and `/plugin marketplace browse [marketplace]`.
+- Interactive browse flow for selecting marketplaces, filtering large plugin lists, choosing plugins, and installing to user or project scope.
+- `/plugin` argument autocomplete for subcommands, marketplace names, plugin specs, config keys, boolean values, and valid flags.
+- Non-interactive browse output with install commands and marketplace diagnostics.
+
+### Changed
+
+- `/plugin update` now refreshes marketplaces before updating installed plugins, including targeted plugin updates.
+- `/plugin help` and README now document browsing, autocomplete, and the marketplace-refresh behavior of plugin updates.
+
+### Fixed
+
+- Autocomplete safely quotes plugin specs that contain spaces and suppresses unsafe non-round-tripping specs.
+- Smoke tests no longer depend on developer-local absolute Pi install paths or remove an existing `node_modules` tree.
+
 ## [0.1.0] - 2026-04-24
 
 ### Added
@@ -37,5 +56,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Installation guidance for pinned releases, latest `main`, project-local installs, and local development.
 - Command reference, configuration reference, marketplace source examples, current coverage, and known limitations.
 
-[Unreleased]: https://github.com/leninkhaidem/pi-claude-plugin-manager/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/leninkhaidem/pi-claude-plugin-manager/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/leninkhaidem/pi-claude-plugin-manager/releases/tag/v0.2.0
 [0.1.0]: https://github.com/leninkhaidem/pi-claude-plugin-manager/releases/tag/v0.1.0

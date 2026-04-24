@@ -135,3 +135,29 @@ export type PluginSpec = {
 export type CommandResult = {
 	reloadRecommended?: boolean;
 };
+
+export type MarketplacePluginListing = {
+	marketplace: string;
+	marketplaceDescription?: string;
+	plugin: string;
+	displaySpec: string;
+	installSpec?: string;
+	installable: boolean;
+	nonInstallableReason?: string;
+	description?: string;
+	version?: string;
+	category?: string;
+	keywords?: string[];
+	entry: MarketplacePluginEntry;
+};
+
+export type MarketplacePluginListingDiagnostic = {
+	marketplace: string;
+	message: string;
+};
+
+export type MarketplacePluginListingResult = {
+	marketplaces: MarketplaceRecord[];
+	plugins: MarketplacePluginListing[];
+	diagnostics: MarketplacePluginListingDiagnostic[];
+};

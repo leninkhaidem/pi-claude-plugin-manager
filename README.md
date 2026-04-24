@@ -14,6 +14,7 @@
 <p>
   <a href="#installation">Installation</a> ·
   <a href="#quick-start">Quick start</a> ·
+  <a href="#browsing-and-autocomplete">Browse</a> ·
   <a href="#commands">Commands</a> ·
   <a href="CHANGELOG.md">Changelog</a>
 </p>
@@ -43,10 +44,10 @@ Claude Code plugins already have a useful marketplace and plugin layout. Pi has 
 > [!IMPORTANT]
 > Pi packages run extension code with local system access. Review third-party packages before installing them.
 
-### Recommended: install the first release
+### Recommended: install the latest release
 
 ```bash
-pi install git:github.com/leninkhaidem/pi-claude-plugin-manager@v0.1.0
+pi install git:github.com/leninkhaidem/pi-claude-plugin-manager@v0.2.0
 ```
 
 Restart Pi or run:
@@ -72,7 +73,7 @@ pi install git:github.com/leninkhaidem/pi-claude-plugin-manager
 ### Install for one project only
 
 ```bash
-pi install git:github.com/leninkhaidem/pi-claude-plugin-manager@v0.1.0 -l
+pi install git:github.com/leninkhaidem/pi-claude-plugin-manager@v0.2.0 -l
 ```
 
 Project-local installs write to `.pi/settings.json`, which can be shared with a repository.
@@ -137,13 +138,51 @@ Those paths are configurable; see [Configuration](#configuration).
 /plugin marketplace add <github-owner/repo | git-url | local-path[#ref]>
 /plugin marketplace update [marketplace]
 /plugin marketplace remove <marketplace>
+/plugin marketplace browse [marketplace]
+/plugin browse [marketplace]
 /plugin install <plugin[@marketplace]> [--project]
-/plugin update [plugin[@marketplace]]
+/plugin update [plugin[@marketplace]]      # refreshes marketplaces before updating plugins
 /plugin enable <plugin[@marketplace]>
 /plugin disable <plugin[@marketplace]>
 /plugin uninstall <plugin[@marketplace]> [--project|--all]
 /plugin reload
 ```
+
+## Browsing and autocomplete
+
+After adding a marketplace, browse its plugins without knowing plugin names up front:
+
+```text
+/plugin browse
+/plugin browse <marketplace>
+/plugin marketplace browse <marketplace>
+```
+
+In the interactive Pi TUI, browse lets you choose a marketplace, narrow large plugin lists with a filter, pick a plugin, and install it for user or project scope. In non-interactive mode, browse prints a readable marketplace/plugin list with install commands.
+
+The `/plugin` command also provides argument autocomplete in the TUI. Type part of a command or identifier and press `Tab`:
+
+```text
+/plugin <Tab>
+/plugin marketplace br<Tab>
+/plugin marketplace browse <Tab>
+/plugin install <Tab>
+/plugin disable <Tab>
+/plugin config set <Tab>
+```
+
+Autocomplete suggests subcommands, marketplace names, installable plugin specs, installed plugin specs, config keys, boolean values, and valid flags. Suggestions use local manager state only; add a marketplace first with `/plugin marketplace add <source>` before browsing or completing marketplace plugins.
+
+## Updating
+
+Use `/plugin update` to refresh marketplace metadata first, then update installed plugins from the refreshed marketplace entries:
+
+```text
+/plugin update
+/plugin update <plugin[@marketplace]>
+```
+
+Targeted plugin updates refresh that plugin's marketplace before reinstalling the plugin.
 
 ## Configuration
 
@@ -211,7 +250,7 @@ Local marketplace while developing:
 - Standalone Pi-managed marketplaces.
 - User-scope and project-scope plugin installs.
 - Plugin enable, disable, update, and uninstall.
-- Marketplace add, update, remove, and list.
+- Marketplace add, update, remove, list, and browse.
 - Claude plugin skills as Pi skills.
 - Claude plugin command markdown as Pi prompt templates.
 - Optional read-only import from Claude Code's existing install state.

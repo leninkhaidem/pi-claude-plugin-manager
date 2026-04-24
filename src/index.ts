@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
+import { getPluginArgumentCompletions } from "./autocomplete.js";
 import { CUSTOM_MESSAGE_TYPE } from "./constants.js";
 import { claudePluginEntriesForCwd, discoverInstalledResourcesCached, installedEntriesForCwd, piManagedKeysForCwd } from "./discovery.js";
 import { emit } from "./format.js";
@@ -14,6 +15,7 @@ export default function claudePluginManager(pi: ExtensionAPI) {
 
 	pi.registerCommand("plugin", {
 		description: "Manage Claude Code marketplace plugins directly from Pi",
+		getArgumentCompletions: getPluginArgumentCompletions,
 		handler: async (args, ctx) => {
 			try {
 				const result = await handleCommand(pi, args, ctx);

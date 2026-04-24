@@ -4,7 +4,7 @@ import path from "node:path";
 import { gitClone, run } from "./git.js";
 import { readJsonFile } from "./fs-utils.js";
 import { marketplacesDir } from "./state.js";
-import type { MarketplaceFile, MarketplacePluginEntry, MarketplaceRecord, MarketplaceSource, State } from "./types.js";
+import type { MarketplaceFile, MarketplacePluginEntry, MarketplacePluginListing, MarketplacePluginListingResult, MarketplaceRecord, MarketplaceSource, State } from "./types.js";
 import { isSameOrDescendant, normalizePath, now, parsePluginSpec, pluginKey, resolveExistingInside, safeSegment } from "./utils.js";
 
 function isLocalInput(input: string): boolean {
@@ -171,6 +171,53 @@ export async function findMarketplacePlugin(state: State, spec: string): Promise
 		marketplaceFile: match.marketplaceFile,
 		entry: match.entry,
 	};
+}
+
+function listingForEntry(record: MarketplaceRecord, marketplaceFile: MarketplaceFile, entry: MarketplacePluginEntry): MarketplacePluginListing {
+	const displaySpec = pluginKey(entry.name, record.name);
+	const parsed = parsePluginSpec(displaySpec);
+	const installable = !displaySpec.startsWith("--") && parsed.plugin === entry.name && parsed.marketplace === record.name;
+	return {
+		marketplace: record.name,
+		marketplaceDescription: record.description ?? marketplaceFile.description ?? marketplaceFile.metadata?.description,
+		plugin: entry.name,
+		displaySpec,
+		installSpec: installable ? displaySpec : undefined,
+		installable,
+		nonInstallableReason: installable ? undefined : `Plugin or marketplace name cannot be represented unambiguously as ${displaySpec}`,
+		description: entry.description,
+		version: entry.version,
+		category: entry.category,
+		keywords: entry.keywords,
+		entry,
+	};
+}
+
+export async function listMarketplacePlugins(state: State, marketplaceName?: string): Promise<MarketplacePluginListingResult> {
+	const marketplaces = marketplaceName
+		? [state.marketplaces[marketplaceName]].filter(Boolean)
+		: Object.values(state.marketplaces);
+	if (marketplaceName && marketplaces.length === 0) throw new Error(`Unknown marketplace: ${marketplaceName}`);
+
+	const result: MarketplacePluginListingResult = {
+		marketplaces: marketplaces.sort((a, b) => a.name.localeCompare(b.name)),
+		plugins: [],
+		diagnostics: [],
+	};
+
+	for (const record of result.marketplaces) {
+		try {
+			const marketplaceFile = await loadMarketplace(record);
+			for (const entry of marketplaceFile.plugins ?? []) {
+				result.plugins.push(listingForEntry(record, marketplaceFile, entry));
+			}
+		} catch (error) {
+			result.diagnostics.push({ marketplace: record.name, message: (error as Error).message });
+		}
+	}
+
+	result.plugins.sort((a, b) => a.marketplace.localeCompare(b.marketplace) || a.plugin.localeCompare(b.plugin));
+	return result;
 }
 
 export async function resolveMarketplacePluginSource(record: MarketplaceRecord, marketplaceFile: MarketplaceFile, source: string): Promise<string> {

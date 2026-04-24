@@ -1,0 +1,265 @@
+{
+  "feature": "plugin-browse-autocomplete",
+  "title": "Plugin Browse and Autocomplete",
+  "description": "Add marketplace browsing and smart /plugin argument autocomplete in the Pi TUI.",
+  "created_at": "2026-04-24T12:44:13Z",
+  "status": "completed",
+  "phases": [
+    {
+      "id": "P1",
+      "name": "Marketplace browse data and output",
+      "description": "Expose marketplace plugin listings in a reusable way and make them visible outside the TUI.",
+      "order": 1,
+      "tasks": [
+        {
+          "id": "P1-T001",
+          "title": "Add marketplace plugin listing helpers",
+          "description": "Add reusable marketplace listing support around `src/marketplace.ts` and existing state records. It must return marketplace entries with stable install specs, descriptions, versions, categories, and keywords where present.",
+          "status": "done",
+          "dependencies": [],
+          "acceptance_criteria": [
+            "Can list plugins for a named marketplace from added marketplace state.",
+            "Can list plugins across all added marketplaces when no marketplace is specified.",
+            "Each listed plugin exposes a display spec in `<plugin>@<marketplace>` form, and only round-tripping specs expose an actionable install value.",
+            "A generated spec is installable only when parsing it returns the original plugin and marketplace names exactly.",
+            "Non-round-tripping specs include a clear non-installable reason and are excluded from install/autocomplete values.",
+            "Missing marketplace names produce the existing style of user-facing error.",
+            "Manifest read or parse failures are returned as diagnostics so browse output and autocomplete can handle them consistently."
+          ],
+          "context": "Browse and autocomplete both need marketplace plugin data without duplicating manifest parsing logic.",
+          "completed_at": "2026-04-24T14:02:02.563Z"
+        },
+        {
+          "id": "P1-T002",
+          "title": "Render browse output for non-TUI use",
+          "description": "Add markdown/plain formatting helpers in `src/format.ts` for marketplace plugin listings. Output must be deterministic and readable for large marketplaces without depending on command routing.",
+          "status": "done",
+          "dependencies": [
+            "P1-T001"
+          ],
+          "acceptance_criteria": [
+            "Formatter output groups plugins by marketplace when more than one marketplace is shown.",
+            "Formatter output sorts plugins deterministically by marketplace and plugin name.",
+            "Each plugin row includes enough information to identify and install it.",
+            "Empty marketplace and no-marketplace inputs produce helpful messages that point to `/plugin marketplace add <source>`.",
+            "Per-marketplace diagnostics from listing helpers are displayed while successful marketplace listings still render.",
+            "Large listings include total counts and stable ordering so output remains scannable."
+          ],
+          "context": "Non-interactive command output should be testable before command routing and should not rely on TUI APIs.",
+          "completed_at": "2026-04-24T14:02:02.563Z"
+        }
+      ]
+    },
+    {
+      "id": "P2",
+      "name": "TUI browse flow",
+      "description": "Add interactive marketplace and plugin selection for first-time users.",
+      "order": 2,
+      "tasks": [
+        {
+          "id": "P2-T001",
+          "title": "Add browse commands and aliases",
+          "description": "Extend `src/commands.ts` so `/plugin browse [marketplace]` and `/plugin marketplace browse [marketplace]` route to the browse flow while preserving all existing command behavior and aliases.",
+          "status": "done",
+          "dependencies": [
+            "P1-T001",
+            "P1-T002"
+          ],
+          "acceptance_criteria": [
+            "`/plugin browse` is accepted as a top-level command.",
+            "`/plugin browse <marketplace>` is accepted for a specific marketplace.",
+            "`/plugin marketplace browse` and `browse` aliases work from the marketplace command group.",
+            "In non-TUI mode, the browse commands print formatted browse output from P1-T002.",
+            "`/plugin help` includes `/plugin browse` and `/plugin marketplace browse` in the command reference.",
+            "Existing marketplace list/add/update/remove commands continue to work."
+          ],
+          "context": "Browse should be discoverable from the same `/plugin` surface instead of introducing another top-level command.",
+          "completed_at": "2026-04-24T14:02:02.563Z"
+        },
+        {
+          "id": "P2-T002",
+          "title": "Implement interactive plugin selection",
+          "description": "When `ctx.hasUI` is true, use existing `ctx.ui.select` and `ctx.ui.input` primitives to choose a marketplace when needed, collect an optional one-shot search filter, and choose from a bounded plugin result list.",
+          "status": "done",
+          "dependencies": [
+            "P2-T001"
+          ],
+          "acceptance_criteria": [
+            "Zero marketplaces shows a helpful add-marketplace message without throwing.",
+            "One marketplace opens its plugin list without an unnecessary marketplace picker.",
+            "Multiple marketplaces let the user choose a marketplace first.",
+            "When the unfiltered plugin count exceeds `PLUGIN_BROWSE_SELECT_LIMIT = 50`, the flow asks for a filter before showing plugin options.",
+            "An explicit `/plugin browse <marketplace>` skips marketplace selection and shows plugins for that marketplace.",
+            "A selected or explicit marketplace with no plugins shows a helpful message and exits without throwing or changing state.",
+            "Marketplace manifest diagnostics are shown as helpful messages instead of crashing the browse flow.",
+            "Plugin filtering matches name, description, category, or keywords and handles no-result states clearly.",
+            "Filtering is one-shot: optional text input narrows the following plugin select, with a clear no-result message and cancel path.",
+            "If filtered results still exceed the threshold, the select list is capped at 50 and the message shows the total count plus guidance to run browse again with a narrower filter.",
+            "Cancelled marketplace, filter, or plugin selections exit without state changes."
+          ],
+          "context": "This mirrors the marketplace browsing expectation from Claude Code and avoids requiring users to know plugin names upfront.",
+          "completed_at": "2026-04-24T14:02:02.563Z"
+        },
+        {
+          "id": "P2-T003",
+          "title": "Add install action after plugin selection",
+          "description": "After a plugin is selected in the TUI browse flow, offer user-scope install, project-scope install, and cancel actions. The install actions must reuse existing install behavior and reload recommendation flow.",
+          "status": "done",
+          "dependencies": [
+            "P2-T002"
+          ],
+          "acceptance_criteria": [
+            "Selecting user-scope install installs the selected `<plugin>@<marketplace>` for user scope.",
+            "Selecting project-scope install installs the selected `<plugin>@<marketplace>` for project scope.",
+            "Selecting cancel exits without state changes.",
+            "Ambiguous/non-installable plugin entries cannot trigger install actions and explain why they cannot be installed.",
+            "Installed-plugin output and reload recommendation match the existing `/plugin install` behavior."
+          ],
+          "context": "Browse should complete the discovery-to-install loop without duplicating installer semantics.",
+          "completed_at": "2026-04-24T14:02:02.563Z"
+        },
+        {
+          "id": "P2-T004",
+          "title": "Expose browse from the default plugin menu",
+          "description": "Update the no-argument `/plugin` TUI menu to include a browse option and make the menu labels clear for first-time users. The menu must still expose current common actions.",
+          "status": "done",
+          "dependencies": [
+            "P2-T003"
+          ],
+          "acceptance_criteria": [
+            "No-argument `/plugin` in TUI includes a browse marketplace/plugins option.",
+            "Existing menu actions for list, config, marketplace list/add, install, update, and help remain available.",
+            "Choosing browse from the menu starts the same browse flow as `/plugin browse`.",
+            "When no marketplaces exist, the browse menu path points users toward adding one first."
+          ],
+          "context": "First-time users are most likely to run `/plugin` or discover it from slash autocomplete, so browsing should be visible immediately.",
+          "completed_at": "2026-04-24T14:02:02.563Z"
+        }
+      ]
+    },
+    {
+      "id": "P3",
+      "name": "Autocomplete",
+      "description": "Add smart argument completions for command discovery and common plugin operations.",
+      "order": 3,
+      "tasks": [
+        {
+          "id": "P3-T001",
+          "title": "Add autocomplete helper contract",
+          "description": "Create a testable autocomplete module used by `src/index.ts`. It must accept Pi’s whole `argumentPrefix` string, return whole-argument replacement values, and isolate local-state reads from command registration.",
+          "status": "done",
+          "dependencies": [],
+          "acceptance_criteria": [
+            "`src/index.ts` registers `/plugin` completions through `getArgumentCompletions`.",
+            "Completion logic is available from an exported helper or module that tests can invoke without interactive TUI internals.",
+            "The helper accepts the raw whole `argumentPrefix` string passed by Pi after `/plugin`, without cursor-position metadata.",
+            "The helper defines or imports shared constants for `PLUGIN_BROWSE_SELECT_LIMIT = 50` and `PLUGIN_AUTOCOMPLETE_LIMIT = 50`.",
+            "Completions filter by the current token prefix and return Pi-compatible autocomplete items with value, label, and optional description.",
+            "Returned item values are whole-argument replacements because Pi replaces the full `argumentPrefix`, not just the current token.",
+            "Nested completions preserve prior tokens, e.g. completing `marketplace br` returns a value like `marketplace browse`.",
+            "Tokenization follows existing `/plugin` argument parsing behavior; unsupported quote/cursor edge cases safely return no custom completions.",
+            "The helper performs only local state and manifest reads and tolerates unreadable marketplace manifests by omitting those entries.",
+            "Marketplace manifest data used for autocomplete is cached in memory and invalidated when marketplace state changes.",
+            "Representative helper tests cover empty input, partial subcommands, nested subcommands, whole-prefix replacement values, and safe fallback on errors."
+          ],
+          "context": "Autocomplete is a runtime UI hook, but smoke verification needs a direct non-interactive surface.",
+          "completed_at": "2026-04-24T14:02:02.563Z"
+        },
+        {
+          "id": "P3-T002",
+          "title": "Add command and config autocomplete",
+          "description": "Provide autocomplete suggestions for top-level commands, marketplace subcommands, config subcommands, config keys, boolean values, and valid command flags using the helper from `src/autocomplete.ts`.",
+          "status": "done",
+          "dependencies": [
+            "P3-T001"
+          ],
+          "acceptance_criteria": [
+            "Typing `/plugin ` suggests top-level commands including `browse`.",
+            "Typing `/plugin marketplace ` suggests marketplace subcommands including `browse`.",
+            "Typing `/plugin config set ` suggests supported config keys.",
+            "Config key and value completions are sourced from the same authoritative config metadata used by `/plugin config`.",
+            "Supported config keys, value types, and value completions are centralized in a shared metadata export consumed by config handling and autocomplete.",
+            "Typing after `claudeReadOnlyImports` suggests boolean values.",
+            "`--project` is suggested only for install and uninstall contexts where valid.",
+            "`--all` is suggested only for uninstall contexts.",
+            "Representative tests cover config subcommands, config keys, boolean values, and whole-argument replacement values."
+          ],
+          "context": "Autocomplete is the primary in-TUI discovery mechanism after the top-level slash command appears.",
+          "completed_at": "2026-04-24T14:02:02.563Z"
+        },
+        {
+          "id": "P3-T003",
+          "title": "Add marketplace and plugin name autocomplete",
+          "description": "Autocomplete known marketplace names and plugin specs from current state. Install should suggest available marketplace plugins; enable, disable, update, and uninstall should suggest installed plugin specs.",
+          "status": "done",
+          "dependencies": [
+            "P1-T001",
+            "P3-T001"
+          ],
+          "acceptance_criteria": [
+            "Marketplace update/remove/browse completions include added marketplace names.",
+            "Install completions include available `<plugin>@<marketplace>` specs from added marketplaces.",
+            "Autocomplete results are prefix-filtered before deterministic ranking and capped to `PLUGIN_AUTOCOMPLETE_LIMIT = 50`.",
+            "Completion ordering is deterministic, prioritizing exact/prefix matches and then marketplace/plugin name sort order.",
+            "Enable/disable/update/uninstall completions include installed plugin specs.",
+            "Non-round-tripping/non-installable plugin specs are excluded from install, enable, disable, update, and uninstall completions.",
+            "Autocomplete does not perform network fetches or marketplace updates.",
+            "Marketplace autocomplete uses cached local manifest data and does not reread every manifest on every keystroke when cache entries are valid.",
+            "Unreadable marketplace manifests are omitted from completions using the shared listing-helper diagnostics policy.",
+            "A generated large-manifest fixture or equivalent check confirms completions remain bounded to local parsing and filtering work.",
+            "Representative tests cover marketplace-name completions, install specs, installed plugin specs, caps, ranking, and whole-argument replacement values."
+          ],
+          "context": "Users should not have to remember exact marketplace or plugin identifiers, especially with large marketplaces.",
+          "completed_at": "2026-04-24T14:02:02.563Z"
+        }
+      ]
+    },
+    {
+      "id": "P4",
+      "name": "Docs and verification",
+      "description": "Document the user-facing discovery workflow and verify the feature end to end.",
+      "order": 4,
+      "tasks": [
+        {
+          "id": "P4-T001",
+          "title": "Update documentation for browse and autocomplete",
+          "description": "Update `README.md`, `CHANGELOG.md`, and `/plugin help` output with the browse workflow, autocomplete discovery behavior, examples, and the difference between browsing added marketplaces and adding new marketplace sources.",
+          "status": "done",
+          "dependencies": [
+            "P2-T004",
+            "P3-T003"
+          ],
+          "acceptance_criteria": [
+            "README documents `/plugin browse` and `/plugin marketplace browse`.",
+            "`/plugin help` output documents browse commands and the first-time browse/add-marketplace path.",
+            "README explains Tab autocomplete for `/plugin` arguments and plugin specs.",
+            "CHANGELOG includes an Unreleased entry describing browse and autocomplete.",
+            "Docs do not imply unsupported remote marketplace search before a marketplace is added."
+          ],
+          "context": "The user asked specifically how first-time users learn available commands in the TUI.",
+          "completed_at": "2026-04-24T14:02:02.563Z"
+        },
+        {
+          "id": "P4-T002",
+          "title": "Expand smoke verification",
+          "description": "Extend smoke or focused verification to cover non-TUI browse output, browse alias behavior, representative autocomplete calls, and mocked interactive browse behavior against fixture marketplace and installed plugin state.",
+          "status": "done",
+          "dependencies": [
+            "P2-T004",
+            "P3-T003"
+          ],
+          "acceptance_criteria": [
+            "Smoke verification covers `/plugin browse` for the fixture marketplace.",
+            "Smoke verification covers `/plugin marketplace browse` alias behavior.",
+            "Verification covers `/plugin help` mentioning browse commands.",
+            "Smoke verification exercises autocomplete for top-level commands, marketplace names, install specs, and installed plugin specs.",
+            "Focused verification covers the interactive browse flow with mocked UI for marketplace selection, threshold filtering, cancel paths, and install action reuse.",
+            "`npm run smoke` passes with an isolated Pi agent directory."
+          ],
+          "context": "Browse and autocomplete are UX features, but they still need repeatable CLI-verifiable behavior before release.",
+          "completed_at": "2026-04-24T14:02:02.563Z"
+        }
+      ]
+    }
+  ]
+}
