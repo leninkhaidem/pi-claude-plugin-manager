@@ -1,0 +1,24 @@
+{
+  "name": "pi-claude-plugin-manager-local",
+  "version": "0.1.2",
+  "private": true,
+  "description": "Standalone Claude Code marketplace plugin lifecycle manager for Pi.",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "claude-code",
+    "plugins"
+  ],
+  "scripts": {
+    "smoke": "./tests/smoke.sh"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}
