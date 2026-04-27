@@ -15,6 +15,7 @@
   <a href="#installation">Installation</a> ·
   <a href="#quick-start">Quick start</a> ·
   <a href="#browsing-and-autocomplete">Browse</a> ·
+  <a href="#skill-manager">Skills</a> ·
   <a href="#commands">Commands</a> ·
   <a href="CHANGELOG.md">Changelog</a>
 </p>
@@ -23,7 +24,7 @@
 
 ---
 
-`pi-claude-plugin-manager` adds a standalone `/plugin` command to Pi. It adapts Claude Code plugin marketplaces into Pi so you can add marketplaces, install plugins, enable or disable them, update them, uninstall them, and load their skills and slash-command markdown as Pi resources.
+`pi-claude-plugin-manager` adds standalone `/plugin` and `/skills` commands to Pi. It adapts Claude Code plugin marketplaces into Pi so you can add marketplaces, install plugins, enable or disable them, update them, uninstall them, and load their skills and slash-command markdown as Pi resources.
 
 It also has an optional read-only bridge for existing Claude Code installs, so plugins already installed under `~/.claude/plugins` can appear in Pi without copying or mutating Claude Code state.
 
@@ -47,7 +48,7 @@ Claude Code plugins already have a useful marketplace and plugin layout. Pi has 
 ### Recommended: install the latest release
 
 ```bash
-pi install git:github.com/leninkhaidem/pi-claude-plugin-manager@v0.2.0
+pi install git:github.com/leninkhaidem/pi-claude-plugin-manager@v0.3.0
 ```
 
 Restart Pi or run:
@@ -56,10 +57,11 @@ Restart Pi or run:
 /reload
 ```
 
-Then verify the command is available:
+Then verify the commands are available:
 
 ```text
 /plugin help
+/skills help
 ```
 
 ### Install latest from `main`
@@ -73,7 +75,7 @@ pi install git:github.com/leninkhaidem/pi-claude-plugin-manager
 ### Install for one project only
 
 ```bash
-pi install git:github.com/leninkhaidem/pi-claude-plugin-manager@v0.2.0 -l
+pi install git:github.com/leninkhaidem/pi-claude-plugin-manager@v0.3.0 -l
 ```
 
 Project-local installs write to `.pi/settings.json`, which can be shared with a repository.
@@ -128,6 +130,8 @@ Those paths are configurable; see [Configuration](#configuration).
 
 ## Commands
 
+### Plugin commands
+
 ```text
 /plugin help
 /plugin list
@@ -145,7 +149,20 @@ Those paths are configurable; see [Configuration](#configuration).
 /plugin enable <plugin[@marketplace]>
 /plugin disable <plugin[@marketplace]>
 /plugin uninstall <plugin[@marketplace]> [--project|--all]
+/plugin check-updates
 /plugin reload
+```
+
+### Skill commands
+
+```text
+/skills help
+/skills list
+/skills toggle [skill-name]
+/skills sources
+/skills sources toggle [source-path]
+/skills sources add <path>
+/skills sources remove [path]
 ```
 
 ## Browsing and autocomplete
@@ -160,18 +177,84 @@ After adding a marketplace, browse its plugins without knowing plugin names up f
 
 In the interactive Pi TUI, browse lets you choose a marketplace, narrow large plugin lists with a filter, pick a plugin, and install it for user or project scope. In non-interactive mode, browse prints a readable marketplace/plugin list with install commands.
 
-The `/plugin` command also provides argument autocomplete in the TUI. Type part of a command or identifier and press `Tab`:
+The `/plugin` and `/skills` commands provide argument autocomplete in the TUI. Type part of a command or identifier and press `Tab`:
 
 ```text
 /plugin <Tab>
 /plugin marketplace br<Tab>
-/plugin marketplace browse <Tab>
 /plugin install <Tab>
-/plugin disable <Tab>
 /plugin config set <Tab>
+/skills <Tab>
+/skills sources <Tab>
 ```
 
-Autocomplete suggests subcommands, marketplace names, installable plugin specs, installed plugin specs, config keys, boolean values, and valid flags. Suggestions use local manager state only; add a marketplace first with `/plugin marketplace add <source>` before browsing or completing marketplace plugins.
+## Skill manager
+
+The `/skills` command manages skills from **all** sources — Pi-native, plugins, and custom directories.
+
+### Listing skills
+
+```text
+/skills list
+```
+
+Shows all skills grouped by source (Pi discovery paths, Pi packages, plugin marketplaces, custom sources) with enabled/disabled status.
+
+### Toggling skills
+
+Toggle individual skills or entire source directories. In the TUI, use the checkbox UI (space to toggle, enter to apply, escape to cancel):
+
+```text
+/skills toggle                   # Interactive checkbox in TUI
+/skills toggle my-skill          # Toggle by name
+/skills sources toggle           # Toggle entire sources in TUI
+```
+
+Disabled skills are stripped from the system prompt via the `before_agent_start` hook.
+
+### Managing skill sources
+
+View all skill discovery sources, including Pi's built-in paths:
+
+```text
+/skills sources                  # Interactive menu in TUI, or list sources
+/skills sources add <path>       # Add a custom source directory
+/skills sources remove [path]    # Remove a custom source
+```
+
+Sources include Pi's built-in paths (`~/.pi/agent/skills/`, `~/.agents/skills/`, `.pi/skills/`, `.agents/skills/`), installed Pi packages, Claude Code plugin marketplaces, and custom directories you add.
+
+## Auto-update checks
+
+On startup, the plugin manager checks for available updates from git-based marketplaces using a lightweight `git ls-remote` probe (no full fetch). Results are cached with a configurable TTL (default: 24 hours).
+
+### Behavior modes
+
+| Mode | Description |
+| --- | --- |
+| `notify` (default) | Non-blocking notification with update count |
+| `prompt` | Interactive select: update all, select which, skip, or disable |
+| `off` | No startup checks |
+
+Configure with:
+
+```text
+/plugin config set updateCheckOnStartup notify
+/plugin config set updateCheckOnStartup prompt
+/plugin config set updateCheckOnStartup off
+/plugin config set updateCheckTTL 3600000          # 1 hour
+/plugin config set updateCheckEnabled false         # disable entirely
+```
+
+### Manual update check
+
+Force-check for updates (ignores TTL):
+
+```text
+/plugin check-updates
+```
+
+In the TUI this shows an interactive checkbox to select which plugins to update.
 
 ## Updating
 
@@ -186,7 +269,7 @@ Targeted plugin updates refresh that plugin's marketplace before reinstalling th
 
 ## Configuration
 
-Claude Code read-only imports are configured in:
+Plugin manager config lives in:
 
 ```text
 ~/.pi/agent/claude-plugin-manager/config.json
@@ -203,23 +286,29 @@ Default config:
 
 Supported keys:
 
-| Key | Purpose |
-| --- | --- |
-| `claudeReadOnlyImports` | Enables or disables read-only imports from Claude Code installs. |
-| `claudeDir` | Base Claude Code directory. Defaults to `~/.claude`. |
-| `claudePluginsDir` | Override for Claude Code's plugin directory. |
-| `claudeSettingsPath` | Override for Claude Code `settings.json`. |
-| `claudeInstalledPluginsPath` | Override for `installed_plugins.json`. |
+| Key | Purpose | Default |
+| --- | --- | --- |
+| `claudeReadOnlyImports` | Enable/disable read-only imports from Claude Code. | `true` |
+| `claudeDir` | Base Claude Code directory. | `~/.claude` |
+| `claudePluginsDir` | Override for Claude Code plugin directory. | — |
+| `claudeSettingsPath` | Override for Claude Code `settings.json`. | — |
+| `claudeInstalledPluginsPath` | Override for `installed_plugins.json`. | — |
+| `skillSources` | Additional directories to discover skills from. | `[]` |
+| `updateCheckEnabled` | Enable/disable startup update checks. | `true` |
+| `updateCheckTTL` | Minimum ms between update checks. | `86400000` (24h) |
+| `updateCheckOnStartup` | Startup behavior: `notify`, `prompt`, or `off`. | `notify` |
 
 Examples:
 
 ```text
 /plugin config
 /plugin config set claudeReadOnlyImports false
-/plugin config set claudeDir ~/.claude
-/plugin config set claudePluginsDir /custom/claude/plugins
+/plugin config set updateCheckOnStartup prompt
+/plugin config set updateCheckTTL 3600000
 /plugin config reset claudePluginsDir
 ```
+
+In the TUI, `/plugin config` shows an interactive editor with key selection, descriptions, and appropriate input types.
 
 ## Marketplace sources
 
@@ -253,6 +342,10 @@ Local marketplace while developing:
 - Marketplace add, update, remove, list, and browse.
 - Claude plugin skills as Pi skills.
 - Claude plugin command markdown as Pi prompt templates.
+- Skill management across all sources (Pi-native, plugin, custom).
+- Skill and source toggling with interactive checkbox UI.
+- Auto-update checks with configurable TTL and notification modes.
+- Interactive config editor in TUI.
 - Optional read-only import from Claude Code's existing install state.
 - Public GitHub, GitHub Enterprise, full Git URLs, and local marketplace paths.
 

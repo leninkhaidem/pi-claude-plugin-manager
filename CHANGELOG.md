@@ -11,6 +11,48 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Claude plugin hooks are not executed yet.
 - Claude plugin MCP servers, LSP servers, monitors, agents, and plugin settings are not imported yet.
 
+## [0.3.0] - 2026-04-27
+
+### Added
+
+- **Skill manager** with `/skills` command for managing skills from all sources.
+  - `/skills list` shows all skills (Pi-native, plugin, custom source) with enabled/disabled status.
+  - `/skills toggle [skill-name]` toggles individual skills on/off via interactive checkbox UI or by name.
+  - `/skills sources` shows all skill discovery sources (Pi paths, packages, plugin marketplaces, custom directories).
+  - `/skills sources toggle` enables/disables entire source directories via checkbox UI.
+  - `/skills sources add <path>` and `/skills sources remove` manage custom skill source directories.
+  - Disabled skills are stripped from the system prompt via `before_agent_start` hook.
+- **Interactive plugin config editor** when running `/plugin config` in TUI.
+  - Select a config key to edit (with current value and description shown).
+  - Boolean keys present true/false select; path keys present text input; enum keys present valid options.
+  - Reset individual keys or all config with confirmation.
+  - Config keys reference via help option.
+- **Interactive checkbox toggle UI** for batch operations.
+  - Space bar to toggle items, enter to apply, escape to cancel.
+  - Shows `*` marker on changed items and pending change count.
+  - Used in `/skills toggle`, `/skills sources toggle`, and `/plugin` → "Toggle plugins on/off".
+- **Plugin toggle** via `/plugin` interactive menu → "Toggle plugins on/off" with checkbox UI.
+- **Auto-update check on startup** for git-based marketplace plugins.
+  - Lightweight probe via `git ls-remote` (no full fetch, ~1-2 seconds per marketplace).
+  - Compares remote marketplace.json plugin versions against installed versions.
+  - Results cached in `state.json` with configurable TTL (default 24 hours).
+  - Runs in background on startup — does not block session start.
+  - `notify` mode (default): non-blocking notification with update count.
+  - `prompt` mode: interactive select with "Update all", "Select which", "Skip", "Disable" options.
+  - `off` mode: no startup checks.
+- **`/plugin check-updates`** command to force-check for updates (ignores TTL).
+  - Shows available updates with old → new version comparison.
+  - In TUI: interactive checkbox to select which plugins to update.
+- New config keys: `updateCheckEnabled`, `updateCheckTTL`, `updateCheckOnStartup`, `skillSources`.
+- New state fields: `disabledSkills`, `disabledSkillSources`, `lastUpdateCheckAt`, `lastUpdateCheckResults`.
+- Tab autocomplete for `/skills` subcommands and `/plugin check-updates`.
+
+### Changed
+
+- Plugin and skill toggle operations no longer auto-prompt for reload. A non-blocking notification reminds the user to run `/reload` when ready, allowing batch changes before reloading.
+- `/plugin config` now shows `skillSources` and update check config keys in the config output.
+- Config `set` command properly handles boolean, numeric, and enum config key types.
+
 ## [0.2.0] - 2026-04-24
 
 ### Added
@@ -56,6 +98,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Installation guidance for pinned releases, latest `main`, project-local installs, and local development.
 - Command reference, configuration reference, marketplace source examples, current coverage, and known limitations.
 
-[Unreleased]: https://github.com/leninkhaidem/pi-claude-plugin-manager/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/leninkhaidem/pi-claude-plugin-manager/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/leninkhaidem/pi-claude-plugin-manager/releases/tag/v0.3.0
 [0.2.0]: https://github.com/leninkhaidem/pi-claude-plugin-manager/releases/tag/v0.2.0
 [0.1.0]: https://github.com/leninkhaidem/pi-claude-plugin-manager/releases/tag/v0.1.0

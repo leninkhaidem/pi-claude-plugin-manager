@@ -1,6 +1,7 @@
 import { realpath } from "node:fs/promises";
 import { exists, readOptionalJsonFile } from "./fs-utils.js";
 import { collectResourcesFromPluginRoot, readPluginManifest } from "./resources.js";
+import { discoverSkillsFromSources } from "./skills.js";
 import { readConfig, readState, resolveManagerConfig } from "./state.js";
 import type { ClaudeInstalledPluginEntry, ClaudeInstalledPluginsFile, ClaudeSettingsFile, InstalledPluginEntry, State } from "./types.js";
 import { isSameOrDescendant, normalizePath } from "./utils.js";
@@ -90,8 +91,18 @@ async function discoverInstalledResources(cwd: string): Promise<{ skillPaths: st
 		promptPaths.push(...resources.promptPaths);
 	}
 
+	// Discover skills from custom skill sources
+	const config = await readConfig();
+	if (config.skillSources && config.skillSources.length > 0) {
+		const customSkills = await discoverSkillsFromSources(config.skillSources);
+		skillPaths.push(...customSkills);
+	}
+
+	// Filter out disabled skills
+	const enabledSkillPaths = skillPaths.filter((p) => state.disabledSkills[p] !== true);
+
 	return {
-		skillPaths: [...new Set(skillPaths)].sort((a, b) => a.localeCompare(b)),
+		skillPaths: [...new Set(enabledSkillPaths)].sort((a, b) => a.localeCompare(b)),
 		promptPaths: [...new Set(promptPaths)].sort((a, b) => a.localeCompare(b)),
 	};
 }

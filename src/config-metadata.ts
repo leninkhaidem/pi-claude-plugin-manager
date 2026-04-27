@@ -30,6 +30,24 @@ export const CONFIG_FIELDS: ConfigField[] = [
 		key: "claudeInstalledPluginsPath",
 		description: "Claude Code installed_plugins.json path override",
 	},
+	{
+		key: "skillSources",
+		description: "Additional directories to discover skills from (array of paths)",
+	},
+	{
+		key: "updateCheckEnabled",
+		description: "Check for plugin updates on startup",
+		values: ["true", "false"],
+	},
+	{
+		key: "updateCheckTTL",
+		description: "Minimum milliseconds between update checks (default: 86400000 = 24h)",
+	},
+	{
+		key: "updateCheckOnStartup",
+		description: "Startup behavior: notify (non-blocking), prompt (interactive), or off",
+		values: ["notify", "prompt", "off"],
+	},
 ];
 
 export const CONFIG_KEYS = CONFIG_FIELDS.map((field) => field.key);

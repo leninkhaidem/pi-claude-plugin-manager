@@ -116,15 +116,30 @@ export type ManagerConfig = {
 	claudePluginsDir?: string;
 	claudeSettingsPath?: string;
 	claudeInstalledPluginsPath?: string;
+	skillSources?: string[];
+	updateCheckEnabled?: boolean;
+	updateCheckTTL?: number;
+	updateCheckOnStartup?: "notify" | "prompt" | "off";
 };
 
 export type ResolvedManagerConfig = Required<ManagerConfig>;
+
+export type UpdateCheckResult = {
+	installedVersion: string;
+	availableVersion: string;
+	marketplace: string;
+	plugin: string;
+};
 
 export type State = {
 	version: 1;
 	marketplaces: Record<string, MarketplaceRecord>;
 	plugins: Record<string, InstalledPluginEntry[]>;
 	enabledPlugins: Record<string, boolean>;
+	disabledSkills: Record<string, boolean>;
+	disabledSkillSources: Record<string, boolean>;
+	lastUpdateCheckAt?: string;
+	lastUpdateCheckResults?: Record<string, UpdateCheckResult>;
 };
 
 export type PluginSpec = {

@@ -1,11 +1,13 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
-import { getPluginArgumentCompletions } from "./autocomplete.js";
+import { getPluginArgumentCompletions, getSkillsArgumentCompletions } from "./autocomplete.js";
 import { CUSTOM_MESSAGE_TYPE } from "./constants.js";
 import { claudePluginEntriesForCwd, discoverInstalledResourcesCached, installedEntriesForCwd, piManagedKeysForCwd } from "./discovery.js";
 import { emit } from "./format.js";
-import { handleCommand } from "./commands.js";
-import { readState } from "./state.js";
+import { handleCommand, handleSkillsCommand } from "./commands.js";
+import { filterDisabledSkillsFromPrompt } from "./skills.js";
+import { readConfig, readState } from "./state.js";
+import { isUpdateCheckDue, runUpdateCheck } from "./update-check.js";
 
 export default function claudePluginManager(pi: ExtensionAPI) {
 	pi.registerMessageRenderer(CUSTOM_MESSAGE_TYPE, (message, _options, theme) => {
@@ -20,11 +22,22 @@ export default function claudePluginManager(pi: ExtensionAPI) {
 			try {
 				const result = await handleCommand(pi, args, ctx);
 				if (result.reloadRecommended && ctx.hasUI) {
-					const reload = await ctx.ui.confirm("Reload Pi resources?", "Plugin changes require /reload before skills/commands appear or disappear. Reload now?");
-					if (reload) {
-						await ctx.reload();
-						return;
-					}
+					ctx.ui.notify("Run /reload when ready to apply changes.", "info");
+				}
+			} catch (error) {
+				await emit(pi, ctx, `Error: ${(error as Error).message}`);
+			}
+		},
+	});
+
+	pi.registerCommand("skills", {
+		description: "Manage skills from plugins and custom source directories",
+		getArgumentCompletions: getSkillsArgumentCompletions,
+		handler: async (args, ctx) => {
+			try {
+				const result = await handleSkillsCommand(pi, args, ctx);
+				if (result.reloadRecommended && ctx.hasUI) {
+					ctx.ui.notify("Run /reload when ready to apply changes.", "info");
 				}
 			} catch (error) {
 				await emit(pi, ctx, `Error: ${(error as Error).message}`);
@@ -36,7 +49,23 @@ export default function claudePluginManager(pi: ExtensionAPI) {
 		return await discoverInstalledResourcesCached(event.cwd);
 	});
 
-	pi.on("session_start", async (_event, ctx) => {
+	pi.on("before_agent_start", async (event) => {
+		try {
+			const state = await readState();
+			const disabledSkillCount = Object.keys(state.disabledSkills).filter((p) => state.disabledSkills[p] === true).length;
+			const disabledSourceCount = Object.keys(state.disabledSkillSources).filter((p) => state.disabledSkillSources[p] === true).length;
+			if (disabledSkillCount > 0 || disabledSourceCount > 0) {
+				const filtered = filterDisabledSkillsFromPrompt(event.systemPrompt, state.disabledSkills, state.disabledSkillSources);
+				if (filtered !== event.systemPrompt) {
+					return { systemPrompt: filtered };
+				}
+			}
+		} catch {
+			// Don't break the agent start if skill filtering fails
+		}
+	});
+
+	pi.on("session_start", async (event, ctx) => {
 		try {
 			const state = await readState();
 			const piManaged = installedEntriesForCwd(state, ctx.cwd);
@@ -48,6 +77,47 @@ export default function claudePluginManager(pi: ExtensionAPI) {
 					`[plugin] Loaded ${resources.skillPaths.length} skill file${resources.skillPaths.length === 1 ? "" : "s"} and ${resources.promptPaths.length} command file${resources.promptPaths.length === 1 ? "" : "s"} from ${piManaged.length} Pi-managed and ${claudeReadOnly.length} Claude Code read-only plugin${total === 1 ? "" : "s"}.`,
 					"success",
 				);
+			}
+
+			// Auto-update check on startup only (not reload/fork/resume)
+			if (event.reason === "startup" && ctx.hasUI && piManaged.length > 0) {
+				const config = await readConfig();
+				if (isUpdateCheckDue(state, config)) {
+					// Run in background — don't block session start
+					runUpdateCheck(state).then(async (results) => {
+						const updateCount = Object.keys(results).length;
+						if (updateCount === 0) return;
+
+						const mode = config.updateCheckOnStartup ?? "notify";
+						if (mode === "notify") {
+							ctx.ui.notify(
+								`[plugin] ${updateCount} plugin update${updateCount === 1 ? "" : "s"} available. Run /plugin check-updates to review.`,
+								"info",
+							);
+						} else if (mode === "prompt") {
+							const entries = Object.entries(results);
+							const summary = entries.map(([key, r]) => `${key}: ${r.installedVersion} → ${r.availableVersion}`).join("\n");
+							const choice = await ctx.ui.select(
+								`${updateCount} plugin update${updateCount === 1 ? "" : "s"} available`,
+								[
+									`Update all (${updateCount})`,
+									"Select which to update",
+									"Skip for now",
+									"Disable update checks",
+								],
+							);
+							if (choice === `Update all (${updateCount})`) {
+								pi.sendUserMessage("/plugin update", { deliverAs: "followUp" });
+							} else if (choice === "Select which to update") {
+								pi.sendUserMessage("/plugin check-updates", { deliverAs: "followUp" });
+							} else if (choice === "Disable update checks") {
+								pi.sendUserMessage("/plugin config set updateCheckOnStartup off", { deliverAs: "followUp" });
+							}
+						}
+					}).catch(() => {
+						// Silently ignore update check failures
+					});
+				}
 			}
 		} catch (error) {
 			if (ctx.hasUI) ctx.ui.notify(`[plugin] Failed to discover Claude plugin resources: ${(error as Error).message}`, "error");

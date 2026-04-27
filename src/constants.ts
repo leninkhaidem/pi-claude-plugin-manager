@@ -4,3 +4,4 @@ export const IGNORED_DIRECTORY_NAMES = new Set(["node_modules", "build", "dist",
 export const DEFAULT_CLAUDE_DIR = "~/.claude";
 export const PLUGIN_BROWSE_SELECT_LIMIT = 50;
 export const PLUGIN_AUTOCOMPLETE_LIMIT = 50;
+export const DEFAULT_UPDATE_CHECK_TTL = 24 * 60 * 60 * 1000; // 24 hours

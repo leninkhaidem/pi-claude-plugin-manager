@@ -8,6 +8,20 @@ import { parsePluginSpec, pluginKey, splitArgs } from "./utils.js";
 
 export { PLUGIN_AUTOCOMPLETE_LIMIT, PLUGIN_BROWSE_SELECT_LIMIT };
 
+const SKILLS_TOP_LEVEL_COMMANDS = [
+	{ value: "help", description: "Show /skills help" },
+	{ value: "list", description: "List all managed skills with status" },
+	{ value: "toggle", description: "Toggle a skill on or off" },
+	{ value: "sources", description: "Manage skill source directories" },
+];
+
+const SKILLS_SOURCES_COMMANDS = [
+	{ value: "list", description: "List all skill sources with status" },
+	{ value: "toggle", description: "Toggle a skill source on/off" },
+	{ value: "add", description: "Add a custom skill source directory" },
+	{ value: "remove", description: "Remove a custom skill source directory" },
+];
+
 const TOP_LEVEL_COMMANDS = [
 	{ value: "help", description: "Show /plugin help" },
 	{ value: "list", description: "List installed and imported plugins" },
@@ -19,6 +33,7 @@ const TOP_LEVEL_COMMANDS = [
 	{ value: "enable", description: "Enable an installed plugin" },
 	{ value: "disable", description: "Disable an installed plugin" },
 	{ value: "uninstall", description: "Uninstall a plugin" },
+	{ value: "check-updates", description: "Check for available plugin updates" },
 	{ value: "reload", description: "Reload Pi resources" },
 ];
 
@@ -152,6 +167,40 @@ async function installablePluginItems(state: State): Promise<Array<{ value: stri
 
 function flagItems(flags: string[]): Array<{ value: string; description?: string }> {
 	return flags.map((flag) => ({ value: flag }));
+}
+
+export async function getSkillsArgumentCompletions(argumentPrefix: string): Promise<AutocompleteItem[] | null> {
+	try {
+		const parsedPrefix = parseCompletionPrefix(argumentPrefix);
+		if (!parsedPrefix) return null;
+		const { tokens, current, before } = parsedPrefix;
+		const command = tokens[0] ?? "";
+
+		if (before.length === 0) return makeItems([], current, SKILLS_TOP_LEVEL_COMMANDS);
+
+		if (command === "sources") {
+			if (before.length === 1) return makeItems(before, current, SKILLS_SOURCES_COMMANDS);
+			return null;
+		}
+
+		if (command === "toggle" && before.length === 1) {
+			const state = await readState();
+			const allDisabled = Object.keys(state.disabledSkills);
+			// We can't easily list all skill names here without full discovery,
+			// but we can suggest disabled skill paths for re-enabling
+			if (allDisabled.length > 0) {
+				return makeItems(before, current, allDisabled.map((p) => {
+					const name = p.split("/").slice(-2, -1)[0] ?? p;
+					return { value: name, description: "disabled" };
+				}));
+			}
+			return null;
+		}
+
+		return null;
+	} catch {
+		return null;
+	}
 }
 
 export async function getPluginArgumentCompletions(argumentPrefix: string): Promise<AutocompleteItem[] | null> {

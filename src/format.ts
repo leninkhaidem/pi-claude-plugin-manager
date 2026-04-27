@@ -31,6 +31,7 @@ ${stateDir()}
 /plugin enable <plugin[@marketplace]>
 /plugin disable <plugin[@marketplace]>
 /plugin uninstall <plugin[@marketplace]> [--project|--all]
+/plugin check-updates
 /plugin reload
 
 ## Browse marketplaces

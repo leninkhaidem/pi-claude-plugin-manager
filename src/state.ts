@@ -32,6 +32,8 @@ export function defaultState(): State {
 		marketplaces: {},
 		plugins: {},
 		enabledPlugins: {},
+		disabledSkills: {},
+		disabledSkillSources: {},
 	};
 }
 
@@ -51,6 +53,10 @@ export async function readState(): Promise<State> {
 			marketplaces: parsed.marketplaces ?? {},
 			plugins: parsed.plugins ?? {},
 			enabledPlugins: parsed.enabledPlugins ?? {},
+			disabledSkills: parsed.disabledSkills ?? {},
+			disabledSkillSources: parsed.disabledSkillSources ?? {},
+			lastUpdateCheckAt: parsed.lastUpdateCheckAt,
+			lastUpdateCheckResults: parsed.lastUpdateCheckResults,
 		};
 	} catch (error) {
 		throw new Error(`Failed to read ${statePath()}: ${(error as Error).message}`);
@@ -87,7 +93,7 @@ export function resolveManagerConfig(config: ManagerConfig): ResolvedManagerConf
 
 export function formatConfig(config: ManagerConfig): string {
 	const resolved = resolveManagerConfig(config);
-	return [
+	const lines = [
 		"# Claude plugin manager config",
 		"",
 		`config path: ${configPath()}`,
@@ -96,5 +102,17 @@ export function formatConfig(config: ManagerConfig): string {
 		`claudePluginsDir: ${resolved.claudePluginsDir}`,
 		`claudeSettingsPath: ${resolved.claudeSettingsPath}`,
 		`claudeInstalledPluginsPath: ${resolved.claudeInstalledPluginsPath}`,
-	].join("\n");
+	];
+	if (config.skillSources && config.skillSources.length > 0) {
+		lines.push(`skillSources:`);
+		for (const source of config.skillSources) {
+			lines.push(`  - ${source}`);
+		}
+	} else {
+		lines.push(`skillSources: (none)`);
+	}
+	lines.push(`updateCheckEnabled: ${config.updateCheckEnabled ?? true}`);
+	lines.push(`updateCheckTTL: ${config.updateCheckTTL ?? "86400000 (24h)"}`);
+	lines.push(`updateCheckOnStartup: ${config.updateCheckOnStartup ?? "notify"}`);
+	return lines.join("\n");
 }
