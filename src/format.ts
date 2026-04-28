@@ -26,8 +26,8 @@ ${stateDir()}
 /plugin marketplace remove <marketplace>
 /plugin marketplace browse [marketplace]
 /plugin browse [marketplace]
-/plugin install <plugin[@marketplace]> [--project]
-/plugin update [plugin[@marketplace]]      # refreshes marketplaces before updating plugins
+/plugin install <plugin[@marketplace]> [--project] [--dev]
+/plugin update [plugin[@marketplace]]      # refreshes marketplaces before updating plugins (skips dev-linked)
 /plugin enable <plugin[@marketplace]>
 /plugin disable <plugin[@marketplace]>
 /plugin uninstall <plugin[@marketplace]> [--project|--all]
@@ -44,6 +44,14 @@ Use Tab in the Pi TUI after /plugin to autocomplete subcommands, marketplace nam
 ## Current adapter coverage
 Loaded into Pi: Claude plugin skills and command markdown files from both Pi-managed installs and read-only Claude Code installs in ~/.claude/plugins.
 Not executed/imported yet: Claude hooks, MCP servers, LSP servers, monitors, agents, plugin settings.
+
+## Dev mode (local development)
+/plugin install my-plugin@my-marketplace --dev
+
+Dev mode creates a symlink to the local source instead of copying.
+Changes in the source directory are picked up on /reload — no reinstall needed.
+**Automatic**: when a marketplace was added via a local path, plugins install in dev mode by default.
+Dev plugins are skipped during /plugin update and update checks.
 
 ## GitHub Enterprise
 Use a full public Git URL or host shorthand, for example:
@@ -138,9 +146,11 @@ export async function formatPluginList(state: State, cwd: string): Promise<strin
 			lines.push(`- ${enabled ? "✓" : "○"} ${key}`);
 			for (const entry of state.plugins[key] ?? []) {
 				const scope = entry.scope === "project" ? `project (${entry.projectPath})` : "user";
-				lines.push(`  - version: ${entry.version}`);
+				const devBadge = entry.dev ? " [dev ↔ symlinked]" : "";
+				lines.push(`  - version: ${entry.version}${devBadge}`);
 				lines.push(`    scope: ${scope}`);
 				lines.push(`    path: ${entry.installPath}`);
+				if (entry.dev && entry.devSourcePath) lines.push(`    source: ${entry.devSourcePath}`);
 				if (entry.description) lines.push(`    description: ${entry.description}`);
 			}
 		}
@@ -170,10 +180,11 @@ export async function emit(pi: ExtensionAPI, ctx: ExtensionContext, text: string
 	}
 }
 
-export async function confirmInstall(ctx: ExtensionCommandContext, key: string, scope: string): Promise<boolean> {
+export async function confirmInstall(ctx: ExtensionCommandContext, key: string, scope: string, dev?: boolean): Promise<boolean> {
 	if (!ctx.hasUI) return true;
+	const devNote = dev ? " This is a dev install — the plugin will be symlinked (not copied), so local changes are picked up on /reload." : "";
 	return await ctx.ui.confirm(
-		"Install Claude plugin?",
-		`Install ${key} to ${scope} scope. This adapter exposes plugin skills and command markdown in Pi. Hooks/MCP/LSP/monitors are not executed by this adapter.`,
+		dev ? "Install Claude plugin in dev mode?" : "Install Claude plugin?",
+		`Install ${key} to ${scope} scope.${devNote} This adapter exposes plugin skills and command markdown in Pi. Hooks/MCP/LSP/monitors are not executed by this adapter.`,
 	);
 }

@@ -587,13 +587,20 @@ async function selectPluginFromMarketplace(pi: ExtensionAPI, ctx: ExtensionComma
 		return {};
 	}
 
-	const action = await ctx.ui.select(`Install ${selectedPlugin.displaySpec}?`, ["Install for user", "Install for project", "Cancel"]);
-	if (action === "Install for user" || action === "Install for project") {
+	const marketplaceRecord = state.marketplaces[selectedMarketplace!];
+	const isLocal = marketplaceRecord?.source.kind === "local";
+	const installOptions = isLocal
+		? ["Install for user", "Install for project", "Install for dev (symlinked)", "Cancel"]
+		: ["Install for user", "Install for project", "Cancel"];
+	const action = await ctx.ui.select(`Install ${selectedPlugin.displaySpec}?`, installOptions);
+	if (action === "Install for user" || action === "Install for project" || action === "Install for dev (symlinked)") {
 		const scope: Scope = action === "Install for project" ? "project" : "user";
-		const installed = await installPluginFromMarketplace(state, selectedPlugin.installSpec, scope, ctx.cwd);
+		const dev = action === "Install for dev (symlinked)";
+		const installed = await installPluginFromMarketplace(state, selectedPlugin.installSpec, scope, ctx.cwd, { dev });
 		await writeState(state);
 		clearRuntimeCaches();
-		await emit(pi, ctx, `Installed ${installed.plugin}@${installed.marketplace}\nversion: ${installed.version}\nscope: ${installed.scope}\npath: ${installed.installPath}\n\nRun /reload or /plugin reload to load newly installed resources.`);
+		const devLabel = installed.dev ? ` [dev \u2194 ${installed.devSourcePath}]` : "";
+		await emit(pi, ctx, `Installed ${installed.plugin}@${installed.marketplace}\nversion: ${installed.version}${devLabel}\nscope: ${installed.scope}\npath: ${installed.installPath}\n\nRun /reload or /plugin reload to load newly installed resources.`);
 		return { reloadRecommended: true };
 	}
 	return {};
@@ -793,18 +800,20 @@ export async function handleCommand(pi: ExtensionAPI, rawArgs: string, ctx: Exte
 	if (command === "install" || command === "add") {
 		const clean = withoutFlags(args.slice(1));
 		const spec = clean[0];
-		if (!spec) throw new Error("Usage: /plugin install <plugin[@marketplace]> [--project]");
+		if (!spec) throw new Error("Usage: /plugin install <plugin[@marketplace]> [--project] [--dev]");
 		const scope: Scope = hasFlag(args, "--project", "-p") ? "project" : "user";
+		const dev = hasFlag(args, "--dev", "--link", "-d");
 		const state = await readState();
 		const found = await findMarketplacePlugin(state, spec);
-		if (!(await confirmInstall(ctx, found.key, scope))) {
+		if (!(await confirmInstall(ctx, found.key, scope, dev))) {
 			await emit(pi, ctx, `Cancelled install of ${found.key}.`);
 			return {};
 		}
-		const installed = await installPluginFromMarketplace(state, spec, scope, ctx.cwd);
+		const installed = await installPluginFromMarketplace(state, spec, scope, ctx.cwd, { dev });
 		await writeState(state);
 		clearRuntimeCaches();
-		await emit(pi, ctx, `Installed ${installed.plugin}@${installed.marketplace}\nversion: ${installed.version}\nscope: ${installed.scope}\npath: ${installed.installPath}\n\nRun /reload or /plugin reload to load newly installed resources.`);
+		const devLabel = installed.dev ? ` [dev ↔ ${installed.devSourcePath}]` : "";
+		await emit(pi, ctx, `Installed ${installed.plugin}@${installed.marketplace}\nversion: ${installed.version}${devLabel}\nscope: ${installed.scope}\npath: ${installed.installPath}\n\nRun /reload or /plugin reload to load newly installed resources.`);
 		return { reloadRecommended: true };
 	}
 
@@ -840,7 +849,9 @@ export async function handleCommand(pi: ExtensionAPI, rawArgs: string, ctx: Exte
 		const spec = args[1];
 		const state = await readState();
 		if (!spec) {
-			const entriesToUpdate = Object.values(state.plugins).flatMap((entries) => entries.map((entry) => ({ ...entry })));
+			const allEntries = Object.values(state.plugins).flatMap((entries) => entries.map((entry) => ({ ...entry })));
+			const entriesToUpdate = allEntries.filter((entry) => !entry.dev);
+			const skippedDev = allEntries.length - entriesToUpdate.length;
 			const marketplaceCount = Object.keys(state.marketplaces).length;
 			const renamed = await refreshMarketplaceRecords(state);
 			for (const entry of entriesToUpdate) {
@@ -852,14 +863,20 @@ export async function handleCommand(pi: ExtensionAPI, rawArgs: string, ctx: Exte
 			}
 			await writeState(state);
 			clearRuntimeCaches();
-			await emit(pi, ctx, `Updated ${marketplaceCount} marketplace${marketplaceCount === 1 ? "" : "s"} and ${entriesToUpdate.length} installed plugin entr${entriesToUpdate.length === 1 ? "y" : "ies"}.\n\nRun /reload or /plugin reload to load updated resources.`);
+			const devNote = skippedDev > 0 ? ` (skipped ${skippedDev} dev-linked plugin${skippedDev === 1 ? "" : "s"})` : "";
+			await emit(pi, ctx, `Updated ${marketplaceCount} marketplace${marketplaceCount === 1 ? "" : "s"} and ${entriesToUpdate.length} installed plugin entr${entriesToUpdate.length === 1 ? "y" : "ies"}${devNote}.\n\nRun /reload or /plugin reload to load updated resources.`);
 			return { reloadRecommended: true };
 		}
 		const parsed = parsePluginSpec(spec);
 		const keys = parsed.marketplace ? [pluginKey(parsed.plugin, parsed.marketplace)] : Object.keys(state.plugins).filter((key) => key.startsWith(`${parsed.plugin}@`));
 		if (keys.length === 0) throw new Error(`Plugin is not installed: ${spec}`);
 		if (!parsed.marketplace && keys.length > 1) throw new Error(`Plugin name is ambiguous. Use plugin@marketplace. Matches: ${keys.join(", ")}`);
-		const entriesToUpdate = keys.flatMap((key) => (state.plugins[key] ?? []).map((entry) => ({ ...entry })));
+		const allEntries = keys.flatMap((key) => (state.plugins[key] ?? []).map((entry) => ({ ...entry })));
+		const entriesToUpdate = allEntries.filter((entry) => !entry.dev);
+		if (entriesToUpdate.length === 0 && allEntries.length > 0) {
+			await emit(pi, ctx, `${spec} is installed in dev mode (symlinked). Changes are picked up automatically on /reload — no update needed.`);
+			return {};
+		}
 		const renamed = await refreshMarketplaceRecords(state, entriesToUpdate.map((entry) => entry.marketplace));
 		for (const entry of entriesToUpdate) {
 			const oldKey = pluginKey(entry.plugin, entry.marketplace);

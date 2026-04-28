@@ -2,11 +2,12 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { getPluginArgumentCompletions, getSkillsArgumentCompletions } from "./autocomplete.js";
 import { CUSTOM_MESSAGE_TYPE } from "./constants.js";
-import { claudePluginEntriesForCwd, discoverInstalledResourcesCached, installedEntriesForCwd, piManagedKeysForCwd } from "./discovery.js";
+import { claudePluginEntriesForCwd, clearDiscoveryCache, discoverInstalledResourcesCached, installedEntriesForCwd, piManagedKeysForCwd } from "./discovery.js";
 import { emit } from "./format.js";
 import { handleCommand, handleSkillsCommand } from "./commands.js";
+import { installPluginFromMarketplace } from "./installer.js";
 import { filterDisabledSkillsFromPrompt } from "./skills.js";
-import { readConfig, readState } from "./state.js";
+import { readConfig, readState, writeState } from "./state.js";
 import { isUpdateCheckDue, runUpdateCheck } from "./update-check.js";
 
 export default function claudePluginManager(pi: ExtensionAPI) {
@@ -68,6 +69,31 @@ export default function claudePluginManager(pi: ExtensionAPI) {
 	pi.on("session_start", async (event, ctx) => {
 		try {
 			const state = await readState();
+
+			// Auto-migrate: convert copied installs from local marketplaces to symlinks
+			let migrated = 0;
+			for (const [key, entries] of Object.entries(state.plugins)) {
+				const snapshot = [...entries];
+				for (const entry of snapshot) {
+					if (entry.dev) continue; // Already symlinked
+					const marketplace = state.marketplaces[entry.marketplace];
+					if (!marketplace || marketplace.source.kind !== "local") continue;
+					try {
+						await installPluginFromMarketplace(state, key, entry.scope, entry.projectPath ?? ctx.cwd);
+						migrated++;
+					} catch (error) {
+						console.warn(`[plugin] Failed to auto-migrate ${key} to dev mode: ${(error as Error).message}`);
+					}
+				}
+			}
+			if (migrated > 0) {
+				await writeState(state);
+				clearDiscoveryCache();
+				if (ctx.hasUI) {
+					ctx.ui.notify(`[plugin] Auto-migrated ${migrated} local plugin${migrated === 1 ? "" : "s"} to dev (symlink) mode.`, "info");
+				}
+			}
+
 			const piManaged = installedEntriesForCwd(state, ctx.cwd);
 			const claudeReadOnly = await claudePluginEntriesForCwd(ctx.cwd, piManagedKeysForCwd(state, ctx.cwd));
 			const resources = await discoverInstalledResourcesCached(ctx.cwd);

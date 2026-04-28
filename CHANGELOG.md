@@ -11,6 +11,36 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Claude plugin hooks are not executed yet.
 - Claude plugin MCP servers, LSP servers, monitors, agents, and plugin settings are not imported yet.
 
+## [0.4.0] - 2026-04-28
+
+### Added
+
+- **Dev mode for local marketplaces** — plugins from local marketplaces are now symlinked instead of copied.
+  - Changes in the local source directory are picked up on `/reload` without reinstalling.
+  - **Automatic**: when a marketplace was added via a local file path, all plugin installs automatically use symlink (dev) mode.
+  - Explicit `--dev` / `--link` / `-d` flag available on `/plugin install` for manual override.
+  - Browse UI shows "Install for dev (symlinked)" option only for local marketplaces.
+  - Dev plugins display `[dev ↔ symlinked]` badge and source path in `/plugin list`.
+  - Dev plugins are skipped during `/plugin update` and update checks.
+  - `/plugin update` on a dev-only plugin explains changes are picked up on `/reload`.
+- **Auto-migration on session start** — existing plugins installed from local marketplaces are automatically converted to symlink (dev) mode.
+  - One-time migration: runs on first session start after upgrade, then becomes a no-op.
+  - Migration failures are logged via `console.warn` (not silently swallowed).
+  - Old copied directories are cleaned up after successful migration.
+- Tab autocomplete for `--dev` flag on `/plugin install`.
+- Dev mode section in `/plugin help` documentation.
+
+### Changed
+
+- Plugin cleanup logic extracted to shared `removeInstallPath()` and `cleanUpReplacedEntries()` helpers, eliminating code duplication across install/uninstall paths.
+- Install path cleanup now uses filesystem-first strategy (`isSymlink` check) instead of relying on the `dev` flag, correctly handling broken symlinks and stale entries.
+- All `rm()` calls on symlinks use `{ force: true }` for idempotent removal.
+- Dev install cache path uses `__dev__` segment (instead of `dev`) to avoid collision with plugins that have a version literally named "dev".
+
+### Fixed
+
+- Stale dev entries with manually-deleted symlinks are now properly cleaned up instead of being silently orphaned.
+
 ## [0.3.0] - 2026-04-27
 
 ### Added
@@ -98,7 +128,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Installation guidance for pinned releases, latest `main`, project-local installs, and local development.
 - Command reference, configuration reference, marketplace source examples, current coverage, and known limitations.
 
-[Unreleased]: https://github.com/leninkhaidem/pi-claude-plugin-manager/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/leninkhaidem/pi-claude-plugin-manager/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/leninkhaidem/pi-claude-plugin-manager/releases/tag/v0.4.0
 [0.3.0]: https://github.com/leninkhaidem/pi-claude-plugin-manager/releases/tag/v0.3.0
 [0.2.0]: https://github.com/leninkhaidem/pi-claude-plugin-manager/releases/tag/v0.2.0
 [0.1.0]: https://github.com/leninkhaidem/pi-claude-plugin-manager/releases/tag/v0.1.0

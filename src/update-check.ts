@@ -107,7 +107,10 @@ async function comparePluginVersions(
 				const installedEntries = state.plugins[key];
 				if (!installedEntries || installedEntries.length === 0) continue;
 
-				const installed = installedEntries[0]!;
+				// Skip dev-linked plugins — they're always "latest"
+				if (installedEntries.every((e) => e.dev)) continue;
+
+				const installed = installedEntries.find((e) => !e.dev) ?? installedEntries[0]!;
 				const remoteVersion = remotePlugin.version ?? info.remoteSha?.slice(0, 12) ?? "unknown";
 				const installedVersion = installed.version;
 

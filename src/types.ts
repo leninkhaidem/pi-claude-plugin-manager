@@ -90,6 +90,8 @@ export type InstalledPluginEntry = {
 	gitCommitSha?: string;
 	manifest?: PluginManifest;
 	marketplaceEntry?: MarketplacePluginEntry;
+	dev?: boolean;
+	devSourcePath?: string;
 };
 
 export type ClaudeInstalledPluginEntry = {

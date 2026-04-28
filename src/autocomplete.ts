@@ -243,10 +243,10 @@ export async function getPluginArgumentCompletions(argumentPrefix: string): Prom
 
 		if ((command === "install" || command === "add") && state) {
 			if (before.length === 1) {
-				if (current.startsWith("--")) return makeItems(before, current, flagItems(["--project"]));
+				if (current.startsWith("--")) return makeItems(before, current, flagItems(["--project", "--dev"]));
 				return makeItems(before, current, await installablePluginItems(state));
 			}
-			if (before.length >= 2 && current.startsWith("--")) return makeItems(before, current, flagItems(["--project"]));
+			if (before.length >= 2 && current.startsWith("--")) return makeItems(before, current, flagItems(["--project", "--dev"]));
 			return null;
 		}
 

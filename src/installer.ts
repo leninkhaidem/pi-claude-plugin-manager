@@ -1,4 +1,4 @@
-import { cp, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { cp, lstat, mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { gitClone, gitHead } from "./git.js";
@@ -71,8 +71,90 @@ async function copyPluginSourceFromEntry(record: MarketplaceRecord, marketplaceF
 	throw new Error(`Unsupported plugin source for ${entry.name}: ${JSON.stringify(source)}`);
 }
 
-export async function installPluginFromMarketplace(state: State, spec: string, scope: Scope, cwd: string): Promise<InstalledPluginEntry> {
+async function resolveDevSourcePath(record: MarketplaceRecord, marketplaceFile: MarketplaceFile, entry: MarketplacePluginEntry): Promise<string> {
+	const source = entry.source;
+	if (typeof source === "string") {
+		return await resolveMarketplacePluginSource(record, marketplaceFile, source);
+	}
+	// For object sources, only relative/local paths make sense in dev mode
+	if (source.path) {
+		const resolved = await resolveExistingInside(record.path, source.path, "dev plugin source.path");
+		if (resolved) return resolved;
+	}
+	throw new Error(`Cannot resolve dev source path for ${entry.name}. Only local/relative plugin sources support --dev mode.`);
+}
+
+async function isSymlink(p: string): Promise<boolean> {
+	try {
+		const stats = await lstat(p);
+		return stats.isSymbolicLink();
+	} catch {
+		return false;
+	}
+}
+
+/** Safely remove an install path — uses filesystem state (not the dev flag) to decide strategy. */
+async function removeInstallPath(installPath: string): Promise<void> {
+	if (await isSymlink(installPath)) {
+		await rm(installPath, { force: true });
+	} else {
+		await rm(installPath, { recursive: true, force: true });
+	}
+}
+
+/** Clean up replaced entries that are no longer referenced by any other install. */
+async function cleanUpReplacedEntries(state: State, replaced: InstalledPluginEntry[], newInstallPath: string): Promise<void> {
+	for (const oldEntry of replaced) {
+		if (oldEntry.installPath !== newInstallPath && !isInstallPathReferenced(state, oldEntry.installPath)) {
+			await removeInstallPath(oldEntry.installPath);
+		}
+	}
+}
+
+export async function installPluginFromMarketplace(state: State, spec: string, scope: Scope, cwd: string, options?: { dev?: boolean }): Promise<InstalledPluginEntry> {
 	const { key, record, marketplaceFile, entry } = await findMarketplacePlugin(state, spec);
+	// Auto-detect: local marketplaces always use symlink (dev) mode unless explicitly overridden
+	const dev = options?.dev ?? (record.source.kind === "local");
+
+	if (dev) {
+		if (record.source.kind !== "local") {
+			throw new Error(`--dev mode requires a local marketplace. ${record.name} is a ${record.source.kind} marketplace. Add it as a local path first.`);
+		}
+		const devSourcePath = await resolveDevSourcePath(record, marketplaceFile, entry);
+		const manifest = await readPluginManifest(devSourcePath);
+		const installPath = path.join(cacheDir(), safeSegment(record.name), safeSegment(entry.name), "__dev__");
+
+		// Remove existing entry (symlink or directory)
+		await removeInstallPath(installPath);
+		await mkdir(path.dirname(installPath), { recursive: true });
+		await symlink(devSourcePath, installPath);
+
+		const installed: InstalledPluginEntry = {
+			scope,
+			projectPath: scope === "project" ? normalizePath(cwd) : undefined,
+			marketplace: record.name,
+			plugin: entry.name,
+			version: "dev",
+			installPath,
+			source: entry.source,
+			description: manifest?.description ?? entry.description,
+			installedAt: now(),
+			updatedAt: now(),
+			manifest,
+			marketplaceEntry: entry,
+			dev: true,
+			devSourcePath: normalizePath(devSourcePath),
+		};
+
+		const current = state.plugins[key] ?? [];
+		const replaced = current.filter((existing) => existing.scope === scope && existing.projectPath === installed.projectPath);
+		const hadEnabledState = Object.prototype.hasOwnProperty.call(state.enabledPlugins, key);
+		state.plugins[key] = [...current.filter((existing) => existing.scope !== scope || existing.projectPath !== installed.projectPath), installed];
+		if (!hadEnabledState) state.enabledPlugins[key] = true;
+		await cleanUpReplacedEntries(state, replaced, installed.installPath);
+		return installed;
+	}
+
 	const tmp = await mkdtemp(path.join(os.tmpdir(), "pi-claude-plugin-install-"));
 	try {
 		const checkout = path.join(tmp, "plugin");
@@ -108,11 +190,7 @@ export async function installPluginFromMarketplace(state: State, spec: string, s
 		const hadEnabledState = Object.prototype.hasOwnProperty.call(state.enabledPlugins, key);
 		state.plugins[key] = [...current.filter((existing) => existing.scope !== scope || existing.projectPath !== installed.projectPath), installed];
 		if (!hadEnabledState) state.enabledPlugins[key] = true;
-		for (const oldEntry of replaced) {
-			if (oldEntry.installPath !== installed.installPath && !isInstallPathReferenced(state, oldEntry.installPath)) {
-				await rm(oldEntry.installPath, { recursive: true, force: true });
-			}
-		}
+		await cleanUpReplacedEntries(state, replaced, installed.installPath);
 		return installed;
 	} finally {
 		await rm(tmp, { recursive: true, force: true });
@@ -149,7 +227,7 @@ export async function uninstallPlugin(state: State, spec: string, scope?: Scope,
 	if (removed.length === 0) throw new Error(`No matching installed plugin entries for ${spec}`);
 	for (const installPath of candidatePathsToRemove) {
 		if (!isInstallPathReferenced(state, installPath)) {
-			await rm(installPath, { recursive: true, force: true });
+			await removeInstallPath(installPath);
 		}
 	}
 	return removed;
