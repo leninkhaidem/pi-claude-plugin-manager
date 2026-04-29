@@ -105,10 +105,10 @@ async function discoverInstalledResources(cwd: string): Promise<{ skillPaths: st
 	// Filter out disabled skills
 	const enabledSkillPaths = skillPaths.filter((p) => state.disabledSkills[p] !== true);
 
-	// Deduplicate agent entries by symlink key (pluginName--basename)
+	// Deduplicate agent entries by basename (last one wins if conflict)
 	const seenAgents = new Set<string>();
 	const uniqueAgentEntries = agentEntries.filter(e => {
-		const key = `${e.pluginName}--${path.basename(e.path)}`;
+		const key = path.basename(e.path);
 		if (seenAgents.has(key)) return false;
 		seenAgents.add(key);
 		return true;

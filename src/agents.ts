@@ -4,40 +4,18 @@ import path from "node:path";
 import type { AgentEntry } from "./resources.js";
 
 /**
- * Derive a filesystem-safe slug from a plugin name.
- * Replaces non-alphanumeric characters with hyphens, collapses runs, trims edges.
- */
-function slugify(name: string): string {
-	return name
-		.toLowerCase()
-		.replace(/[^a-z0-9]+/g, "-")
-		.replace(/^-+|-+$/g, "")
-		|| "unknown";
-}
-
-/**
- * Build symlink name: <plugin-slug>--<basename>
- * Example: nso--planning.md
+ * Build symlink name: use the original basename as-is.
+ * Example: planning.md
  */
 function symlinkName(entry: AgentEntry): string {
-	const slug = slugify(entry.pluginName);
-	const basename = path.basename(entry.path);
-	return `${slug}--${basename}`;
-}
-
-/**
- * Check if a symlink name was created by this manager.
- * Plugin-managed agent symlinks use the pattern: <slug>--<name>.md
- * They are always symlinks (not regular files), so we check both naming and symlink status.
- */
-function isPluginManagedName(name: string): boolean {
-	return name.includes("--") && name.endsWith(".md");
+	return path.basename(entry.path);
 }
 
 /**
  * Sync agent symlinks in ~/.pi/agent/agents/ to match discovered agent entries.
- * Creates symlinks with "<plugin>--" prefix for namespace isolation.
- * Removes stale plugin-managed symlinks that no longer match any installed plugin.
+ * Creates symlinks using the original agent filename.
+ * Only manages symlinks — regular files created by users are never touched.
+ * Removes symlinks that no longer match any installed plugin agent.
  */
 export async function syncAgentSymlinks(agentEntries: AgentEntry[]): Promise<{ added: string[]; removed: string[] }> {
 	const agentsDir = path.join(getAgentDir(), "agents");
@@ -50,12 +28,12 @@ export async function syncAgentSymlinks(agentEntries: AgentEntry[]): Promise<{ a
 		desired.set(linkName, entry.path);
 	}
 
-	// Read current directory — only look at plugin-managed symlinks
+	// Read current directory — only look at symlinks (never touch regular files)
 	const existing = new Map<string, string>(); // linkName -> target
 	try {
 		const entries = await readdir(agentsDir, { withFileTypes: true });
 		for (const entry of entries) {
-			if (!isPluginManagedName(entry.name)) continue;
+			if (!entry.name.endsWith(".md")) continue;
 			const fullPath = path.join(agentsDir, entry.name);
 			try {
 				const stats = await lstat(fullPath);
@@ -70,14 +48,28 @@ export async function syncAgentSymlinks(agentEntries: AgentEntry[]): Promise<{ a
 	const added: string[] = [];
 	const removed: string[] = [];
 
-	// Remove stale symlinks (managed by us but no longer needed)
+	// Remove stale symlinks that point to paths no longer in desired state
 	for (const [linkName, target] of existing) {
 		if (!desired.has(linkName) || desired.get(linkName) !== target) {
+			// Only remove if the current target looks like a plugin agent path
+			// (i.e., it's in the desired set for update, or it was previously managed)
 			const fullPath = path.join(agentsDir, linkName);
-			try {
-				await unlink(fullPath);
-				removed.push(linkName);
-			} catch {}
+			if (desired.has(linkName)) {
+				// Target changed — update it
+				try { await unlink(fullPath); removed.push(linkName); } catch {}
+			} else {
+				// Not in desired — only remove if it's a broken symlink or points outside agents dir
+				// This prevents removing user-created symlinks
+				try {
+					const resolvedTarget = path.resolve(agentsDir, target);
+					const targetExists = await lstat(resolvedTarget).then(() => true).catch(() => false);
+					if (!targetExists) {
+						// Broken symlink — safe to remove
+						await unlink(fullPath);
+						removed.push(linkName);
+					}
+				} catch {}
+			}
 		}
 	}
 
