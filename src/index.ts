@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
+import { syncAgentSymlinks } from "./agents.js";
 import { getPluginArgumentCompletions, getSkillsArgumentCompletions } from "./autocomplete.js";
 import { CUSTOM_MESSAGE_TYPE } from "./constants.js";
 import { claudePluginEntriesForCwd, clearDiscoveryCache, discoverInstalledResourcesCached, installedEntriesForCwd, piManagedKeysForCwd } from "./discovery.js";
@@ -98,9 +99,23 @@ export default function claudePluginManager(pi: ExtensionAPI) {
 			const claudeReadOnly = await claudePluginEntriesForCwd(ctx.cwd, piManagedKeysForCwd(state, ctx.cwd));
 			const resources = await discoverInstalledResourcesCached(ctx.cwd);
 			const total = piManaged.length + claudeReadOnly.length;
-			if (ctx.hasUI && (total > 0 || resources.skillPaths.length > 0 || resources.promptPaths.length > 0)) {
+
+			// Sync agent symlinks into ~/.pi/agent/agents/ (always run to clean up stale symlinks)
+			try {
+				await syncAgentSymlinks(resources.agentEntries);
+			} catch (error) {
+				if (ctx.hasUI) ctx.ui.notify(`[plugin] Failed to sync agent symlinks: ${(error as Error).message}`, "error");
+			}
+
+			if (ctx.hasUI && (total > 0 || resources.skillPaths.length > 0 || resources.promptPaths.length > 0 || resources.agentEntries.length > 0)) {
+				const parts: string[] = [];
+				parts.push(`${resources.skillPaths.length} skill file${resources.skillPaths.length === 1 ? "" : "s"}`);
+				parts.push(`${resources.promptPaths.length} command file${resources.promptPaths.length === 1 ? "" : "s"}`);
+				if (resources.agentEntries.length > 0) {
+					parts.push(`${resources.agentEntries.length} agent file${resources.agentEntries.length === 1 ? "" : "s"}`);
+				}
 				ctx.ui.notify(
-					`[plugin] Loaded ${resources.skillPaths.length} skill file${resources.skillPaths.length === 1 ? "" : "s"} and ${resources.promptPaths.length} command file${resources.promptPaths.length === 1 ? "" : "s"} from ${piManaged.length} Pi-managed and ${claudeReadOnly.length} Claude Code read-only plugin${total === 1 ? "" : "s"}.`,
+					`[plugin] Loaded ${parts.join(", ")} from ${piManaged.length} Pi-managed and ${claudeReadOnly.length} Claude Code read-only plugin${total === 1 ? "" : "s"}.`,
 					"success",
 				);
 			}

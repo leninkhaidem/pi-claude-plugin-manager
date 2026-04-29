@@ -1,7 +1,8 @@
+import { syncAgentSymlinks } from "./agents.js";
 import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 import { clearAutocompleteCache, PLUGIN_BROWSE_SELECT_LIMIT } from "./autocomplete.js";
 import { CONFIG_FIELDS, isConfigKey } from "./config-metadata.js";
-import { clearDiscoveryCache } from "./discovery.js";
+import { clearDiscoveryCache, discoverInstalledResourcesCached } from "./discovery.js";
 import { confirmInstall, emit, formatBrowseList, formatHelp, formatMarketplaceList, formatPluginList } from "./format.js";
 import { installPluginFromMarketplace, uninstallPlugin } from "./installer.js";
 import { addMarketplace, findMarketplacePlugin, listMarketplacePlugins, refreshMarketplace } from "./marketplace.js";
@@ -826,6 +827,11 @@ export async function handleCommand(pi: ExtensionAPI, rawArgs: string, ctx: Exte
 		const removed = await uninstallPlugin(state, spec, scope, ctx.cwd);
 		await writeState(state);
 		clearRuntimeCaches();
+		// Sync agent symlinks immediately to clean up stale ones
+		try {
+			const resources = await discoverInstalledResourcesCached(ctx.cwd);
+			await syncAgentSymlinks(resources.agentEntries);
+		} catch {}
 		await emit(pi, ctx, `Uninstalled:\n${removed.map((item) => `- ${item}`).join("\n")}\n\nRun /reload or /plugin reload to unload removed resources.`);
 		return { reloadRecommended: true };
 	}

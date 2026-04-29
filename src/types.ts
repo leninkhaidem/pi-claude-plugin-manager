@@ -45,6 +45,7 @@ export type MarketplacePluginEntry = {
 	license?: string;
 	skills?: string | string[];
 	commands?: string | string[];
+	agents?: string | string[];
 	strict?: boolean;
 	[key: string]: unknown;
 };
@@ -73,6 +74,7 @@ export type PluginManifest = {
 	keywords?: string[];
 	skills?: string | string[];
 	commands?: string | string[];
+	agents?: string | string[];
 	[key: string]: unknown;
 };
 

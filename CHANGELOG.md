@@ -9,7 +9,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Planned
 
 - Claude plugin hooks are not executed yet.
-- Claude plugin MCP servers, LSP servers, monitors, agents, and plugin settings are not imported yet.
+- Claude plugin MCP servers, LSP servers, monitors, and plugin settings are not imported yet.
+
+## [0.5.0] - 2026-04-29
+
+### Added
+
+- **Sub-agent installation support** — plugins with an `agents/` directory now have their agent markdown files automatically symlinked into `~/.pi/agent/agents/` for pi-crew discovery.
+  - Agent symlinks use `<plugin-slug>--<basename>.md` naming convention for namespace isolation (e.g., `nso--planning.md`).
+  - Symlink sync runs on every `session_start` — automatically creates new symlinks and cleans up stale ones.
+  - Symlink cleanup also runs immediately during `/plugin uninstall` to prevent stale agents from causing errors.
+  - Supports both `manifest.agents` and marketplace entry `agents` field for custom agent directory paths; defaults to `agents/` directory.
+  - Agent count displayed in `/plugin list` output alongside skill and command counts (e.g., `resources: 11 skills, 2 commands, 6 agents`).
+  - Session start notification now includes agent file count when agents are present.
+- New `AgentEntry` type tracks plugin identity alongside agent path, preventing name collisions when multiple plugins ship agents with the same filename.
+- `agents` field added to `PluginManifest` and `MarketplacePluginEntry` types.
+
+### Changed
+
+- Extracted shared `collectMarkdownFromPath()` helper used by both command and agent directory scanning (previously duplicated).
+- `discoverInstalledResources` now returns `agentEntries` alongside `skillPaths` and `promptPaths`.
+- `collectResourcesFromPluginRoot` extended to discover agent files from plugins.
+- Removed "agents" from the "Not executed/imported yet" status message in `/plugin help`.
 
 ## [0.4.0] - 2026-04-28
 

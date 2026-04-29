@@ -15,7 +15,7 @@ export async function readPluginManifest(pluginRoot: string): Promise<PluginMani
 	return await readJsonFile<PluginManifest>(manifestPath);
 }
 
-function resourcePaths(manifest: PluginManifest | undefined, entry: MarketplacePluginEntry | undefined, kind: "skills" | "commands"): string[] {
+function resourcePaths(manifest: PluginManifest | undefined, entry: MarketplacePluginEntry | undefined, kind: "skills" | "commands" | "agents"): string[] {
 	const fromManifest = arrayify(manifest?.[kind] as string | string[] | undefined);
 	if (fromManifest.length > 0) return fromManifest;
 	const fromEntry = arrayify(entry?.[kind] as string | string[] | undefined);
@@ -23,18 +23,29 @@ function resourcePaths(manifest: PluginManifest | undefined, entry: MarketplaceP
 	return [kind];
 }
 
-export async function collectResourcesFromPluginRoot(pluginRoot: string, manifest?: PluginManifest, entry?: MarketplacePluginEntry): Promise<{ skillPaths: string[]; promptPaths: string[] }> {
+export type AgentEntry = { pluginName: string; path: string };
+
+export async function collectResourcesFromPluginRoot(pluginRoot: string, manifest?: PluginManifest, entry?: MarketplacePluginEntry): Promise<{ skillPaths: string[]; promptPaths: string[]; agentEntries: AgentEntry[] }> {
+	const pluginName = manifest?.name ?? entry?.name ?? path.basename(pluginRoot);
 	const skillPaths: string[] = [];
 	const promptPaths: string[] = [];
+	const agentEntries: AgentEntry[] = [];
 	for (const rel of resourcePaths(manifest, entry, "skills")) {
 		const target = await resolveExistingInside(pluginRoot, rel, "plugin skills path");
 		if (target) skillPaths.push(...(await collectSkillPathsFromDir(target, pluginRoot)));
 	}
 	for (const rel of resourcePaths(manifest, entry, "commands")) {
 		const target = await resolveExistingInside(pluginRoot, rel, "plugin commands path");
-		if (target) promptPaths.push(...(await collectCommandMarkdownFromPath(target)));
+		if (target) promptPaths.push(...(await collectMarkdownFromPath(target)));
 	}
-	return { skillPaths, promptPaths };
+	for (const rel of resourcePaths(manifest, entry, "agents")) {
+		const target = await resolveExistingInside(pluginRoot, rel, "plugin agents path");
+		if (target) {
+			const paths = await collectMarkdownFromPath(target);
+			agentEntries.push(...paths.map(p => ({ pluginName, path: p })));
+		}
+	}
+	return { skillPaths, promptPaths, agentEntries };
 }
 
 async function collectSkillPathsFromDir(dir: string, pluginRoot: string): Promise<string[]> {
@@ -54,7 +65,7 @@ async function collectSkillPathsFromDir(dir: string, pluginRoot: string): Promis
 	return result;
 }
 
-async function collectCommandMarkdownFromPath(root: string): Promise<string[]> {
+async function collectMarkdownFromPath(root: string): Promise<string[]> {
 	if (!(await exists(root))) return [];
 	const stats = await stat(root);
 	if (stats.isFile()) return root.endsWith(".md") ? [root] : [];

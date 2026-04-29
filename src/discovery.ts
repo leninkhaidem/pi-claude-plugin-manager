@@ -1,12 +1,13 @@
 import { realpath } from "node:fs/promises";
+import path from "node:path";
 import { exists, readOptionalJsonFile } from "./fs-utils.js";
-import { collectResourcesFromPluginRoot, readPluginManifest } from "./resources.js";
+import { type AgentEntry, collectResourcesFromPluginRoot, readPluginManifest } from "./resources.js";
 import { discoverSkillsFromSources } from "./skills.js";
 import { readConfig, readState, resolveManagerConfig } from "./state.js";
 import type { ClaudeInstalledPluginEntry, ClaudeInstalledPluginsFile, ClaudeSettingsFile, InstalledPluginEntry, State } from "./types.js";
 import { isSameOrDescendant, normalizePath } from "./utils.js";
 
-const discoveryCache = new Map<string, Promise<{ skillPaths: string[]; promptPaths: string[] }>>();
+const discoveryCache = new Map<string, Promise<{ skillPaths: string[]; promptPaths: string[]; agentEntries: AgentEntry[] }>>();
 
 export function clearDiscoveryCache() {
 	discoveryCache.clear();
@@ -71,17 +72,19 @@ export async function claudePluginEntriesForCwd(cwd: string, skipKeys = new Set<
 	return result;
 }
 
-async function discoverInstalledResources(cwd: string): Promise<{ skillPaths: string[]; promptPaths: string[] }> {
+async function discoverInstalledResources(cwd: string): Promise<{ skillPaths: string[]; promptPaths: string[]; agentEntries: AgentEntry[] }> {
 	const state = await readState();
 	const piManaged = installedEntriesForCwd(state, cwd);
 	const piManagedKeys = piManagedKeysForCwd(state, cwd);
 	const skillPaths: string[] = [];
 	const promptPaths: string[] = [];
+	const agentEntries: AgentEntry[] = [];
 
 	for (const { entry } of piManaged) {
 		const resources = await collectResourcesFromPluginRoot(entry.installPath, entry.manifest, entry.marketplaceEntry);
 		skillPaths.push(...resources.skillPaths);
 		promptPaths.push(...resources.promptPaths);
+		agentEntries.push(...resources.agentEntries);
 	}
 
 	for (const { installPath } of await claudePluginEntriesForCwd(cwd, piManagedKeys)) {
@@ -89,6 +92,7 @@ async function discoverInstalledResources(cwd: string): Promise<{ skillPaths: st
 		const resources = await collectResourcesFromPluginRoot(installPath, manifest);
 		skillPaths.push(...resources.skillPaths);
 		promptPaths.push(...resources.promptPaths);
+		agentEntries.push(...resources.agentEntries);
 	}
 
 	// Discover skills from custom skill sources
@@ -101,13 +105,23 @@ async function discoverInstalledResources(cwd: string): Promise<{ skillPaths: st
 	// Filter out disabled skills
 	const enabledSkillPaths = skillPaths.filter((p) => state.disabledSkills[p] !== true);
 
+	// Deduplicate agent entries by symlink key (pluginName--basename)
+	const seenAgents = new Set<string>();
+	const uniqueAgentEntries = agentEntries.filter(e => {
+		const key = `${e.pluginName}--${path.basename(e.path)}`;
+		if (seenAgents.has(key)) return false;
+		seenAgents.add(key);
+		return true;
+	});
+
 	return {
 		skillPaths: [...new Set(enabledSkillPaths)].sort((a, b) => a.localeCompare(b)),
 		promptPaths: [...new Set(promptPaths)].sort((a, b) => a.localeCompare(b)),
+		agentEntries: uniqueAgentEntries,
 	};
 }
 
-export async function discoverInstalledResourcesCached(cwd: string): Promise<{ skillPaths: string[]; promptPaths: string[] }> {
+export async function discoverInstalledResourcesCached(cwd: string): Promise<{ skillPaths: string[]; promptPaths: string[]; agentEntries: AgentEntry[] }> {
 	const key = normalizePath(cwd);
 	let cached = discoveryCache.get(key);
 	if (!cached) {

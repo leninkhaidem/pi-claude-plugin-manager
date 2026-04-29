@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { claudePluginEntriesForCwd } from "./discovery.js";
+import { collectResourcesFromPluginRoot, readPluginManifest } from "./resources.js";
 import { stateDir } from "./state.js";
 import type { MarketplacePluginListing, MarketplacePluginListingResult, State } from "./types.js";
 
@@ -43,7 +44,7 @@ Use Tab in the Pi TUI after /plugin to autocomplete subcommands, marketplace nam
 
 ## Current adapter coverage
 Loaded into Pi: Claude plugin skills and command markdown files from both Pi-managed installs and read-only Claude Code installs in ~/.claude/plugins.
-Not executed/imported yet: Claude hooks, MCP servers, LSP servers, monitors, agents, plugin settings.
+Not executed/imported yet: Claude hooks, MCP servers, LSP servers, monitors, plugin settings.
 
 ## Dev mode (local development)
 /plugin install my-plugin@my-marketplace --dev
@@ -152,6 +153,14 @@ export async function formatPluginList(state: State, cwd: string): Promise<strin
 				lines.push(`    path: ${entry.installPath}`);
 				if (entry.dev && entry.devSourcePath) lines.push(`    source: ${entry.devSourcePath}`);
 				if (entry.description) lines.push(`    description: ${entry.description}`);
+				try {
+					const resources = await collectResourcesFromPluginRoot(entry.installPath, entry.manifest, entry.marketplaceEntry);
+					const counts: string[] = [];
+					if (resources.skillPaths.length > 0) counts.push(`${resources.skillPaths.length} skill${resources.skillPaths.length === 1 ? "" : "s"}`);
+					if (resources.promptPaths.length > 0) counts.push(`${resources.promptPaths.length} command${resources.promptPaths.length === 1 ? "" : "s"}`);
+					if (resources.agentEntries.length > 0) counts.push(`${resources.agentEntries.length} agent${resources.agentEntries.length === 1 ? "" : "s"}`);
+					if (counts.length > 0) lines.push(`    resources: ${counts.join(", ")}`);
+				} catch {}
 			}
 		}
 	}
