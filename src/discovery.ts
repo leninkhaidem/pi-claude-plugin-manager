@@ -105,12 +105,15 @@ async function discoverInstalledResources(cwd: string): Promise<{ skillPaths: st
 	// Filter out disabled skills
 	const enabledSkillPaths = skillPaths.filter((p) => state.disabledSkills[p] !== true);
 
-	// Deduplicate agent entries by basename (last one wins if conflict)
-	const seenAgents = new Set<string>();
+	// Deduplicate agent entries by basename (first one wins if conflict)
+	const seenAgents = new Map<string, string>(); // basename → pluginName
 	const uniqueAgentEntries = agentEntries.filter(e => {
 		const key = path.basename(e.path);
-		if (seenAgents.has(key)) return false;
-		seenAgents.add(key);
+		if (seenAgents.has(key)) {
+			console.debug(`[plugin] Agent collision: ${key} from "${e.pluginName}" shadowed by "${seenAgents.get(key)}"`);
+			return false;
+		}
+		seenAgents.set(key, e.pluginName);
 		return true;
 	});
 
