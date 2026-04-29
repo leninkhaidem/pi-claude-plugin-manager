@@ -16,13 +16,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Added
 
 - **Sub-agent installation support** — plugins with an `agents/` directory now have their agent markdown files automatically symlinked into `~/.pi/agent/agents/` for pi-crew discovery.
-  - Agent symlinks use `<plugin-slug>--<basename>.md` naming convention for namespace isolation (e.g., `nso--planning.md`).
+  - Agent symlinks use the original source filename (e.g., `planning.md`) — no prefixes.
+  - Ownership tracked via `.managed.json` manifest — never overwrites user-created files or unmanaged symlinks.
   - Symlink sync runs on every `session_start` — automatically creates new symlinks and cleans up stale ones.
-  - Symlink cleanup also runs immediately during `/plugin uninstall` to prevent stale agents from causing errors.
+  - Symlink cleanup also runs immediately during `/plugin uninstall` to prevent stale agents.
   - Supports both `manifest.agents` and marketplace entry `agents` field for custom agent directory paths; defaults to `agents/` directory.
   - Agent count displayed in `/plugin list` output alongside skill and command counts (e.g., `resources: 11 skills, 2 commands, 6 agents`).
   - Session start notification now includes agent file count when agents are present.
-- New `AgentEntry` type tracks plugin identity alongside agent path, preventing name collisions when multiple plugins ship agents with the same filename.
+  - Collision detection: logs warning when multiple plugins provide agents with the same filename (first plugin wins).
+  - Migration: automatically removes old-format symlinks (`*--*.md` pattern) from previous versions.
+- New `AgentEntry` type tracks plugin identity alongside agent path.
 - `agents` field added to `PluginManifest` and `MarketplacePluginEntry` types.
 
 ### Changed
