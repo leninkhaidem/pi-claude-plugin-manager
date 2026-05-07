@@ -75,7 +75,7 @@ pi install git:github.com/leninkhaidem/pi-claude-plugin-manager
 ### Install for one project only
 
 ```bash
-pi install git:github.com/leninkhaidem/pi-claude-plugin-manager@v0.3.0 -l
+pi install git:github.com/leninkhaidem/pi-claude-plugin-manager -l
 ```
 
 Project-local installs write to `.pi/settings.json`, which can be shared with a repository.
