@@ -48,7 +48,7 @@ Claude Code plugins already have a useful marketplace and plugin layout. Pi has 
 ### Recommended: install the latest release
 
 ```bash
-pi install git:github.com/leninkhaidem/pi-claude-plugin-manager@v0.3.0
+pi install git:github.com/leninkhaidem/pi-claude-plugin-manager
 ```
 
 Restart Pi or run:
