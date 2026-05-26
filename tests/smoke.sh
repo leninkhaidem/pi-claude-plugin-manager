@@ -135,7 +135,7 @@ run_pi "/plugin list" | grep -q "✓ demo@fixture-marketplace"
 run_pi "/plugin disable demo@fixture-marketplace" | grep -q "Disabled demo@fixture-marketplace"
 run_pi "/plugin list" | grep -q "○ demo@fixture-marketplace"
 run_pi "/plugin enable demo@fixture-marketplace" | grep -q "Enabled demo@fixture-marketplace"
-run_pi "/plugin update demo@fixture-marketplace" | grep -q "after refreshing 1 marketplace"
+run_pi "/plugin update demo@fixture-marketplace" | grep -q "dev mode (symlinked)"
 run_pi "/plugin update" | grep -q "Updated 1 marketplace"
 
 node - "$AGENT" <<'NODE'
@@ -152,10 +152,20 @@ NODE
 
 NPM_GLOBAL_ROOT="$(npm root -g)"
 MARIOZECHNER_ROOT="$NPM_GLOBAL_ROOT/@mariozechner"
-PI_PACKAGE_ROOT="$MARIOZECHNER_ROOT/pi-coding-agent"
-JITI_REGISTER="$PI_PACKAGE_ROOT/node_modules/@mariozechner/jiti/lib/jiti-register.mjs"
-if [[ ! -d "$MARIOZECHNER_ROOT" || ! -f "$JITI_REGISTER" ]]; then
-  echo "Could not resolve Pi's global @mariozechner packages from npm root: $NPM_GLOBAL_ROOT" >&2
+PI_PACKAGE_ROOT=""
+JITI_REGISTER=""
+if [[ -d "$MARIOZECHNER_ROOT/pi-coding-agent" ]]; then
+  PI_PACKAGE_ROOT="$MARIOZECHNER_ROOT/pi-coding-agent"
+  JITI_REGISTER="$PI_PACKAGE_ROOT/node_modules/@mariozechner/jiti/lib/jiti-register.mjs"
+  if [[ ! -f "$JITI_REGISTER" ]]; then
+    JITI_REGISTER="$PI_PACKAGE_ROOT/node_modules/jiti/lib/jiti-register.mjs"
+  fi
+elif [[ -d "$NPM_GLOBAL_ROOT/@earendil-works/pi-coding-agent" ]]; then
+  PI_PACKAGE_ROOT="$NPM_GLOBAL_ROOT/@earendil-works/pi-coding-agent"
+  JITI_REGISTER="$PI_PACKAGE_ROOT/node_modules/jiti/lib/jiti-register.mjs"
+fi
+if [[ -z "$PI_PACKAGE_ROOT" || ! -f "$JITI_REGISTER" ]]; then
+  echo "Could not resolve Pi's global package or jiti register from npm root: $NPM_GLOBAL_ROOT" >&2
   exit 1
 fi
 if [[ ! -e "$ROOT/node_modules" ]]; then
@@ -163,11 +173,21 @@ if [[ ! -e "$ROOT/node_modules" ]]; then
   CREATED_NODE_MODULES_DIR=1
 fi
 if [[ ! -e "$ROOT/node_modules/@mariozechner" ]]; then
-  ln -s "$MARIOZECHNER_ROOT" "$ROOT/node_modules/@mariozechner"
+  if [[ -d "$MARIOZECHNER_ROOT" && -d "$MARIOZECHNER_ROOT/pi-coding-agent" ]]; then
+    ln -s "$MARIOZECHNER_ROOT" "$ROOT/node_modules/@mariozechner"
+  else
+    mkdir -p "$TMP/mariozechner"
+    ln -s "$PI_PACKAGE_ROOT" "$TMP/mariozechner/pi-coding-agent"
+    if [[ -d "$PI_PACKAGE_ROOT/node_modules/@earendil-works/pi-tui" ]]; then
+      ln -s "$PI_PACKAGE_ROOT/node_modules/@earendil-works/pi-tui" "$TMP/mariozechner/pi-tui"
+    fi
+    ln -s "$TMP/mariozechner" "$ROOT/node_modules/@mariozechner"
+  fi
   CREATED_MARIOZECHNER_LINK=1
 fi
 JITI_FS_CACHE="$TMP/jiti-cache" PI_CODING_AGENT_DIR="$AGENT" node --import "$JITI_REGISTER" "$ROOT/tests/mock-ui-browse.mjs" | grep -q "mock ui browse ok"
 JITI_FS_CACHE="$TMP/jiti-cache" PI_CODING_AGENT_DIR="$AGENT" node --import "$JITI_REGISTER" "$ROOT/tests/autocomplete-smoke.mjs" | grep -q "autocomplete smoke ok"
+JITI_FS_CACHE="$TMP/jiti-cache" PI_CODING_AGENT_DIR="$AGENT" node --import "$JITI_REGISTER" "$ROOT/tests/marketplace-refresh-diverged.mjs" | grep -q "marketplace refresh diverged smoke ok"
 
 run_pi "/plugin uninstall demo@fixture-marketplace" | grep -q "demo@fixture-marketplace (user)"
 run_pi "/plugin uninstall browse-demo@fixture-marketplace" | grep -q "browse-demo@fixture-marketplace (user)"

@@ -110,6 +110,35 @@ export async function addMarketplace(input: string): Promise<MarketplaceRecord> 
 	}
 }
 
+async function resolveGitRefreshTarget(repoPath: string): Promise<string> {
+	try {
+		const result = await run("git", ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], { cwd: repoPath, timeoutMs: 10_000 });
+		const upstream = result.stdout.trim();
+		if (upstream) return upstream;
+	} catch {}
+
+	try {
+		await run("git", ["rev-parse", "--verify", "origin/HEAD"], { cwd: repoPath, timeoutMs: 10_000 });
+		return "origin/HEAD";
+	} catch {}
+
+	return "FETCH_HEAD";
+}
+
+async function refreshGitMarketplaceCache(record: MarketplaceRecord): Promise<void> {
+	// Git marketplaces are cloned into Pi's managed cache. They are not user worktrees,
+	// so refresh should converge to the requested remote ref even if the cache diverged
+	// because of a force-push, rewritten tag, or stale shallow clone.
+	if (record.source.ref) {
+		await run("git", ["fetch", "--depth", "1", "origin", record.source.ref], { cwd: record.path, timeoutMs: 120_000 });
+		await run("git", ["checkout", "--force", "FETCH_HEAD"], { cwd: record.path, timeoutMs: 30_000 });
+	} else {
+		await run("git", ["fetch", "--depth", "1", "origin"], { cwd: record.path, timeoutMs: 120_000 });
+		await run("git", ["reset", "--hard", await resolveGitRefreshTarget(record.path)], { cwd: record.path, timeoutMs: 30_000 });
+	}
+	await run("git", ["clean", "-fd"], { cwd: record.path, timeoutMs: 30_000 });
+}
+
 export async function refreshMarketplace(record: MarketplaceRecord): Promise<MarketplaceRecord> {
 	if (record.source.kind === "local") {
 		const { marketplace, root } = await readMarketplaceAt(record.source.localPath ?? record.path);
@@ -123,12 +152,7 @@ export async function refreshMarketplace(record: MarketplaceRecord): Promise<Mar
 		};
 	}
 
-	if (record.source.ref) {
-		await run("git", ["fetch", "--depth", "1", "origin", record.source.ref], { cwd: record.path, timeoutMs: 120_000 });
-		await run("git", ["checkout", "FETCH_HEAD"], { cwd: record.path, timeoutMs: 30_000 });
-	} else {
-		await run("git", ["pull", "--ff-only"], { cwd: record.path, timeoutMs: 120_000 });
-	}
+	await refreshGitMarketplaceCache(record);
 	const { marketplace } = await readMarketplaceAt(record.path);
 	return {
 		...record,

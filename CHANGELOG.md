@@ -11,6 +11,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Claude plugin hooks are not executed yet.
 - Claude plugin MCP servers, LSP servers, monitors, and plugin settings are not imported yet.
 
+## [0.5.1] - 2026-05-26
+
+### Changed
+
+- Updated installation examples so users install the current plugin manager release instead of an old pinned version.
+
+### Fixed
+
+- Fixed git marketplace refreshes so Pi-managed cache checkouts recover from remote rewrites or other divergence instead of failing with `git pull --ff-only` errors during `/plugin update` or marketplace refresh.
+
 ## [0.5.0] - 2026-04-29
 
 ### Added
@@ -152,7 +162,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Installation guidance for pinned releases, latest `main`, project-local installs, and local development.
 - Command reference, configuration reference, marketplace source examples, current coverage, and known limitations.
 
-[Unreleased]: https://github.com/leninkhaidem/pi-claude-plugin-manager/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/leninkhaidem/pi-claude-plugin-manager/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/leninkhaidem/pi-claude-plugin-manager/releases/tag/v0.5.1
+[0.5.0]: https://github.com/leninkhaidem/pi-claude-plugin-manager/releases/tag/v0.5.0
 [0.4.0]: https://github.com/leninkhaidem/pi-claude-plugin-manager/releases/tag/v0.4.0
 [0.3.0]: https://github.com/leninkhaidem/pi-claude-plugin-manager/releases/tag/v0.3.0
 [0.2.0]: https://github.com/leninkhaidem/pi-claude-plugin-manager/releases/tag/v0.2.0
