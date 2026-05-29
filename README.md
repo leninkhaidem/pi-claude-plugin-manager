@@ -258,14 +258,14 @@ In the TUI this shows an interactive checkbox to select which plugins to update.
 
 ## Updating
 
-Use `/plugin update` to refresh marketplace metadata first, then update installed plugins from the refreshed marketplace entries:
+Use `/plugin update` to refresh marketplace metadata first, then update installed plugins from the refreshed marketplace entries. `/plugin marketplace update` only refreshes marketplace metadata and does not reinstall plugins:
 
 ```text
 /plugin update
 /plugin update <plugin[@marketplace]>
 ```
 
-Targeted plugin updates refresh that plugin's marketplace before reinstalling the plugin.
+Targeted plugin updates refresh that plugin's marketplace before reinstalling the plugin. After reinstalling, update output lists each installed plugin entry with either `old → new` or `unchanged <version>` so you can tell whether the plugin version actually changed.
 
 ## Configuration
 

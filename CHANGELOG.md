@@ -11,6 +11,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Claude plugin hooks are not executed yet.
 - Claude plugin MCP servers, LSP servers, monitors, and plugin settings are not imported yet.
 
+## [0.5.2] - 2026-05-29
+
+### Added
+
+- `/plugin update` now reports each installed plugin entry's version result after reinstalling, showing either `old → new` or `unchanged <version>` so users can immediately tell whether an update changed anything.
+
+### Changed
+
+- `/plugin marketplace update` now clarifies that it refreshes marketplace metadata only and does not reinstall or change installed plugin versions.
+
 ## [0.5.1] - 2026-05-26
 
 ### Changed

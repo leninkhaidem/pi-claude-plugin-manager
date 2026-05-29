@@ -10,7 +10,7 @@ import { buildSkillList, buildSourceList, discoverSkillsFromSources, formatSkill
 import { CheckboxSelector, type CheckboxItem, type CheckboxResult } from "./checkbox.js";
 import { formatUpdateCheckResults, runUpdateCheck } from "./update-check.js";
 import { defaultConfig, formatConfig, readConfig, readState, writeConfig, writeState } from "./state.js";
-import type { CommandResult, MarketplacePluginListing, ManagerConfig, Scope, State } from "./types.js";
+import type { CommandResult, InstalledPluginEntry, MarketplacePluginListing, ManagerConfig, Scope, State } from "./types.js";
 import { hasFlag, normalizePath, parsePluginSpec, pluginKey, splitArgs, withoutFlags } from "./utils.js";
 import { rm } from "node:fs/promises";
 import { collectResourcesFromPluginRoot, readPluginManifest } from "./resources.js";
@@ -646,6 +646,42 @@ function removeUpdatedEntryForRenamedMarketplace(state: State, oldKey: string, n
 	}
 }
 
+type PluginUpdateVersionReport = {
+	oldKey: string;
+	newKey: string;
+	scope: Scope;
+	projectPath?: string;
+	previousVersion: string;
+	currentVersion: string;
+};
+
+function updateVersionReport(oldKey: string, previous: InstalledPluginEntry, current: InstalledPluginEntry): PluginUpdateVersionReport {
+	return {
+		oldKey,
+		newKey: pluginKey(current.plugin, current.marketplace),
+		scope: current.scope,
+		projectPath: current.projectPath,
+		previousVersion: previous.version,
+		currentVersion: current.version,
+	};
+}
+
+function formatUpdateScope(report: PluginUpdateVersionReport): string {
+	return report.scope === "project" ? `project${report.projectPath ? ` (${report.projectPath})` : ""}` : "user";
+}
+
+function formatPluginUpdateVersionSummary(reports: PluginUpdateVersionReport[]): string {
+	if (reports.length === 0) return "";
+	const lines = ["Plugin versions:"];
+	const sorted = [...reports].sort((a, b) => a.newKey.localeCompare(b.newKey) || formatUpdateScope(a).localeCompare(formatUpdateScope(b)));
+	for (const report of sorted) {
+		const key = report.oldKey === report.newKey ? report.newKey : `${report.oldKey} → ${report.newKey}`;
+		const version = report.previousVersion === report.currentVersion ? `unchanged ${report.currentVersion}` : `${report.previousVersion} → ${report.currentVersion}`;
+		lines.push(`- ${key} (${formatUpdateScope(report)}): ${version}`);
+	}
+	return lines.join("\n");
+}
+
 async function handleMarketplaceCommand(pi: ExtensionAPI, args: string[], ctx: ExtensionCommandContext): Promise<CommandResult> {
 	const sub = args[0] ?? "list";
 	const state = await readState();
@@ -673,7 +709,7 @@ async function handleMarketplaceCommand(pi: ExtensionAPI, args: string[], ctx: E
 		await refreshMarketplaceRecords(state, name ? [name] : undefined);
 		await writeState(state);
 		clearRuntimeCaches();
-		await emit(pi, ctx, `Updated ${count} marketplace${count === 1 ? "" : "s"}.`);
+		await emit(pi, ctx, `Updated ${count} marketplace${count === 1 ? "" : "s"}. Installed plugin versions were not changed by this command; run /plugin update to reinstall plugins and see version results.`);
 		return {};
 	}
 
@@ -859,18 +895,22 @@ export async function handleCommand(pi: ExtensionAPI, rawArgs: string, ctx: Exte
 			const entriesToUpdate = allEntries.filter((entry) => !entry.dev);
 			const skippedDev = allEntries.length - entriesToUpdate.length;
 			const marketplaceCount = Object.keys(state.marketplaces).length;
+			const versionReports: PluginUpdateVersionReport[] = [];
 			const renamed = await refreshMarketplaceRecords(state);
 			for (const entry of entriesToUpdate) {
 				const oldKey = pluginKey(entry.plugin, entry.marketplace);
 				const marketplace = renamed.get(entry.marketplace) ?? entry.marketplace;
 				const newKey = pluginKey(entry.plugin, marketplace);
 				removeUpdatedEntryForRenamedMarketplace(state, oldKey, newKey, entry);
-				await installPluginFromMarketplace(state, newKey, entry.scope, entry.projectPath ?? ctx.cwd);
+				const installed = await installPluginFromMarketplace(state, newKey, entry.scope, entry.projectPath ?? ctx.cwd);
+				versionReports.push(updateVersionReport(oldKey, entry, installed));
 			}
 			await writeState(state);
 			clearRuntimeCaches();
 			const devNote = skippedDev > 0 ? ` (skipped ${skippedDev} dev-linked plugin${skippedDev === 1 ? "" : "s"})` : "";
-			await emit(pi, ctx, `Updated ${marketplaceCount} marketplace${marketplaceCount === 1 ? "" : "s"} and ${entriesToUpdate.length} installed plugin entr${entriesToUpdate.length === 1 ? "y" : "ies"}${devNote}.\n\nRun /reload or /plugin reload to load updated resources.`);
+			const versionSummary = formatPluginUpdateVersionSummary(versionReports);
+			const versionBlock = versionSummary ? `\n\n${versionSummary}` : "";
+			await emit(pi, ctx, `Updated ${marketplaceCount} marketplace${marketplaceCount === 1 ? "" : "s"} and ${entriesToUpdate.length} installed plugin entr${entriesToUpdate.length === 1 ? "y" : "ies"}${devNote}.${versionBlock}\n\nRun /reload or /plugin reload to load updated resources.`);
 			return { reloadRecommended: true };
 		}
 		const parsed = parsePluginSpec(spec);
@@ -883,17 +923,22 @@ export async function handleCommand(pi: ExtensionAPI, rawArgs: string, ctx: Exte
 			await emit(pi, ctx, `${spec} is installed in dev mode (symlinked). Changes are picked up automatically on /reload — no update needed.`);
 			return {};
 		}
+		const versionReports: PluginUpdateVersionReport[] = [];
+		const refreshedMarketplaceCount = new Set(entriesToUpdate.map((entry) => entry.marketplace)).size;
 		const renamed = await refreshMarketplaceRecords(state, entriesToUpdate.map((entry) => entry.marketplace));
 		for (const entry of entriesToUpdate) {
 			const oldKey = pluginKey(entry.plugin, entry.marketplace);
 			const marketplace = renamed.get(entry.marketplace) ?? entry.marketplace;
 			const newKey = pluginKey(entry.plugin, marketplace);
 			removeUpdatedEntryForRenamedMarketplace(state, oldKey, newKey, entry);
-			await installPluginFromMarketplace(state, newKey, entry.scope, entry.projectPath ?? ctx.cwd);
+			const installed = await installPluginFromMarketplace(state, newKey, entry.scope, entry.projectPath ?? ctx.cwd);
+			versionReports.push(updateVersionReport(oldKey, entry, installed));
 		}
 		await writeState(state);
 		clearRuntimeCaches();
-		await emit(pi, ctx, `Updated ${entriesToUpdate.length} installed plugin entr${entriesToUpdate.length === 1 ? "y" : "ies"} for ${spec} after refreshing ${new Set(entriesToUpdate.map((entry) => entry.marketplace)).size} marketplace${new Set(entriesToUpdate.map((entry) => entry.marketplace)).size === 1 ? "" : "s"}.\n\nRun /reload or /plugin reload to load updated resources.`);
+		const versionSummary = formatPluginUpdateVersionSummary(versionReports);
+		const versionBlock = versionSummary ? `\n\n${versionSummary}` : "";
+		await emit(pi, ctx, `Updated ${entriesToUpdate.length} installed plugin entr${entriesToUpdate.length === 1 ? "y" : "ies"} for ${spec} after refreshing ${refreshedMarketplaceCount} marketplace${refreshedMarketplaceCount === 1 ? "" : "s"}.${versionBlock}\n\nRun /reload or /plugin reload to load updated resources.`);
 		return { reloadRecommended: true };
 	}
 

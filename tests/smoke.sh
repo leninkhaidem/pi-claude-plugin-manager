@@ -188,6 +188,7 @@ fi
 JITI_FS_CACHE="$TMP/jiti-cache" PI_CODING_AGENT_DIR="$AGENT" node --import "$JITI_REGISTER" "$ROOT/tests/mock-ui-browse.mjs" | grep -q "mock ui browse ok"
 JITI_FS_CACHE="$TMP/jiti-cache" PI_CODING_AGENT_DIR="$AGENT" node --import "$JITI_REGISTER" "$ROOT/tests/autocomplete-smoke.mjs" | grep -q "autocomplete smoke ok"
 JITI_FS_CACHE="$TMP/jiti-cache" PI_CODING_AGENT_DIR="$AGENT" node --import "$JITI_REGISTER" "$ROOT/tests/marketplace-refresh-diverged.mjs" | grep -q "marketplace refresh diverged smoke ok"
+JITI_FS_CACHE="$TMP/jiti-cache" node --import "$JITI_REGISTER" "$ROOT/tests/update-version-reporting.mjs" | grep -q "update version reporting smoke ok"
 
 run_pi "/plugin uninstall demo@fixture-marketplace" | grep -q "demo@fixture-marketplace (user)"
 run_pi "/plugin uninstall browse-demo@fixture-marketplace" | grep -q "browse-demo@fixture-marketplace (user)"
