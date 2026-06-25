@@ -8,6 +8,7 @@ import { installPluginFromMarketplace, uninstallPlugin } from "./installer.js";
 import { addMarketplace, findMarketplacePlugin, listMarketplacePlugins, refreshMarketplace } from "./marketplace.js";
 import { buildSkillList, buildSourceList, discoverSkillsFromSources, type SkillInfo, type SkillSourceInfo } from "./skills.js";
 import { CheckboxSelector, type CheckboxItem, type CheckboxResult } from "./checkbox.js";
+import { createManageSkillsTui, type ManageSkillsTuiResult } from "./manage-skills-tui.js";
 import { formatUpdateCheckResults, runUpdateCheck } from "./update-check.js";
 import { defaultConfig, formatConfig, readConfig, readState, writeConfig, writeState } from "./state.js";
 import type { CommandResult, InstalledPluginEntry, MarketplacePluginListing, ManagerConfig, Scope, State } from "./types.js";
@@ -231,21 +232,23 @@ async function getPluginSkillPaths(cwd: string): Promise<string[]> {
 
 export async function handleManageSkillsCommand(pi: ExtensionAPI, rawArgs: string, ctx: ExtensionCommandContext): Promise<CommandResult> {
 	const args = splitArgs(rawArgs);
-	const command = args[0] ?? "status";
+	const command = args[0] ?? "";
 
 	if (command === "help" || command === "--help" || command === "-h") {
 		await emit(pi, ctx, formatManageSkillsHelp());
 		return {};
 	}
 
-	if (command === "status" || command === "") {
-		const state = await readState();
-		const config = await readConfig();
-		const pluginSkillPaths = await getPluginSkillPaths(ctx.cwd);
-		const customSkillPaths = await discoverSkillsFromSources(config.skillSources ?? []);
-		const skills = await buildSkillList(pi, pluginSkillPaths, customSkillPaths, state.skillPolicy, ctx.cwd, config.skillSources ?? []);
-		const sources = buildSourceList(skills, config.skillSources ?? [], state.skillPolicy, ctx.cwd);
+	if (command === "status") {
+		const { skills, sources } = await loadManageSkillsInventory(pi, ctx.cwd);
 		await emit(pi, ctx, formatManageSkillsStatus(skills, sources));
+		return {};
+	}
+
+	if (command === "") {
+		if (ctx.hasUI) return await runManageSkillsTui(pi, ctx);
+		const { skills, sources } = await loadManageSkillsInventory(pi, ctx.cwd);
+		await emit(pi, ctx, `${formatManageSkillsStatus(skills, sources)}\n\nInteractive editing requires Pi TUI mode. Run /manage-skills in an interactive terminal, or use /manage-skills help for details.`);
 		return {};
 	}
 
@@ -253,12 +256,46 @@ export async function handleManageSkillsCommand(pi: ExtensionAPI, rawArgs: strin
 	return {};
 }
 
+async function loadManageSkillsInventory(pi: ExtensionAPI, cwd: string): Promise<{ state: State; config: ManagerConfig; skills: SkillInfo[]; sources: SkillSourceInfo[] }> {
+	const state = await readState();
+	const config = await readConfig();
+	const pluginSkillPaths = await getPluginSkillPaths(cwd);
+	const customSkillPaths = await discoverSkillsFromSources(config.skillSources ?? []);
+	const skills = await buildSkillList(pi, pluginSkillPaths, customSkillPaths, state.skillPolicy, cwd, config.skillSources ?? []);
+	const sources = buildSourceList(skills, config.skillSources ?? [], state.skillPolicy, cwd);
+	return { state, config, skills, sources };
+}
+
+async function runManageSkillsTui(pi: ExtensionAPI, ctx: ExtensionCommandContext): Promise<CommandResult> {
+	const { state, skills, sources } = await loadManageSkillsInventory(pi, ctx.cwd);
+	const result = await ctx.ui.custom<ManageSkillsTuiResult>((tui, _theme, _keybindings, done) => createManageSkillsTui({
+		cwd: ctx.cwd,
+		skills,
+		sources,
+		state,
+		saveState: writeState,
+		done,
+		tui,
+		onSaved: clearRuntimeCaches,
+	}), {
+		overlay: true,
+		overlayOptions: { anchor: "center", width: "90%", minWidth: 50, maxHeight: "80%" },
+	});
+	if (result?.changed) {
+		await emit(pi, ctx, "Skill policy updated. Disabled skills are prompt-filtered and /skill blocked immediately; run /reload to refresh manager-owned discovered skills.");
+		return { reloadRecommended: true };
+	}
+	return {};
+}
+
 function formatManageSkillsHelp(): string {
 	return `# /manage-skills — Skill manager
 
-/manage-skills            # Compact skill policy status
+/manage-skills            # Open the interactive skill manager in Pi TUI mode
 /manage-skills status     # Compact skill policy status
 /manage-skills help       # Show this help
+
+The interactive manager shows a searchable per-skill table with global defaults, this-folder overrides, effective state, and detail actions for skill and source policy.
 
 Disabled skills are removed from the model prompt and explicit /skill:<name> invocations are blocked before skill expansion. Manager-owned disabled skills and sources are omitted from resource discovery after /reload; re-enabled resources reappear after /reload.
 
