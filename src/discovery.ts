@@ -2,7 +2,8 @@ import { realpath } from "node:fs/promises";
 import path from "node:path";
 import { exists, readOptionalJsonFile } from "./fs-utils.js";
 import { type AgentEntry, collectResourcesFromPluginRoot, readPluginManifest } from "./resources.js";
-import { discoverSkillsFromSources } from "./skills.js";
+import { evaluateSkillPolicy } from "./skill-policy.js";
+import { discoverSkillsFromSources, readSkillInfo, sourceRootForSkillPath } from "./skills.js";
 import { readConfig, readState, resolveManagerConfig } from "./state.js";
 import type { ClaudeInstalledPluginEntry, ClaudeInstalledPluginsFile, ClaudeSettingsFile, InstalledPluginEntry, State } from "./types.js";
 import { isSameOrDescendant, normalizePath } from "./utils.js";
@@ -97,13 +98,22 @@ async function discoverInstalledResources(cwd: string): Promise<{ skillPaths: st
 
 	// Discover skills from custom skill sources
 	const config = await readConfig();
-	if (config.skillSources && config.skillSources.length > 0) {
-		const customSkills = await discoverSkillsFromSources(config.skillSources);
+	const customSourceRoots = config.skillSources ?? [];
+	if (customSourceRoots.length > 0) {
+		const customSkills = await discoverSkillsFromSources(customSourceRoots);
 		skillPaths.push(...customSkills);
 	}
 
-	// Filter out disabled skills
-	const enabledSkillPaths = skillPaths.filter((p) => state.disabledSkills[p] !== true);
+	// Filter out manager-owned disabled skills and disabled source roots using the durable policy model.
+	const enabledSkillPaths: string[] = [];
+	for (const skillPath of skillPaths) {
+		const normalizedSkillPath = normalizePath(skillPath);
+		const info = await readSkillInfo(normalizedSkillPath);
+		const sourceRoot = sourceRootForSkillPath(normalizedSkillPath, { cwd, customSourceRoots }).sourceRoot;
+		if (evaluateSkillPolicy(state.skillPolicy, { name: info?.name || path.basename(path.dirname(normalizedSkillPath)), path: normalizedSkillPath, sourceRoot }, cwd).enabled) {
+			enabledSkillPaths.push(normalizedSkillPath);
+		}
+	}
 
 	// Deduplicate agent entries by basename (first one wins if conflict)
 	const seenAgents = new Map<string, string>(); // basename → pluginName

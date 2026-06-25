@@ -185,12 +185,15 @@ export async function getSkillsArgumentCompletions(argumentPrefix: string): Prom
 
 		if (command === "toggle" && before.length === 1) {
 			const state = await readState();
-			const allDisabled = Object.keys(state.disabledSkills);
+			const disabledSkillKeys = [
+				...Object.keys(state.skillPolicy.global.skills).filter((key) => state.skillPolicy.global.skills[key] === "disabled"),
+				...Object.keys(state.skillPolicy.global.names).filter((key) => state.skillPolicy.global.names[key] === "disabled"),
+			];
 			// We can't easily list all skill names here without full discovery,
-			// but we can suggest disabled skill paths for re-enabling
-			if (allDisabled.length > 0) {
-				return makeItems(before, current, allDisabled.map((p) => {
-					const name = p.split("/").slice(-2, -1)[0] ?? p;
+			// but we can suggest disabled skill paths/names for re-enabling.
+			if (disabledSkillKeys.length > 0) {
+				return makeItems(before, current, disabledSkillKeys.map((p) => {
+					const name = p.includes("/") ? (p.split("/").slice(-2, -1)[0] ?? p) : p;
 					return { value: name, description: "disabled" };
 				}));
 			}

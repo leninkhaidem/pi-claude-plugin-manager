@@ -7,7 +7,7 @@ import { claudePluginEntriesForCwd, clearDiscoveryCache, discoverInstalledResour
 import { emit } from "./format.js";
 import { handleCommand, handleSkillsCommand } from "./commands.js";
 import { installPluginFromMarketplace } from "./installer.js";
-import { filterDisabledSkillsFromPrompt } from "./skills.js";
+import { filterSkillsFromPromptByPolicy } from "./skills.js";
 import { readConfig, readState, writeState } from "./state.js";
 import { isUpdateCheckDue, runUpdateCheck } from "./update-check.js";
 
@@ -54,13 +54,9 @@ export default function claudePluginManager(pi: ExtensionAPI) {
 	pi.on("before_agent_start", async (event) => {
 		try {
 			const state = await readState();
-			const disabledSkillCount = Object.keys(state.disabledSkills).filter((p) => state.disabledSkills[p] === true).length;
-			const disabledSourceCount = Object.keys(state.disabledSkillSources).filter((p) => state.disabledSkillSources[p] === true).length;
-			if (disabledSkillCount > 0 || disabledSourceCount > 0) {
-				const filtered = filterDisabledSkillsFromPrompt(event.systemPrompt, state.disabledSkills, state.disabledSkillSources);
-				if (filtered !== event.systemPrompt) {
-					return { systemPrompt: filtered };
-				}
+			const filtered = filterSkillsFromPromptByPolicy(event.systemPrompt, state.skillPolicy, (event as { cwd?: string }).cwd);
+			if (filtered !== event.systemPrompt) {
+				return { systemPrompt: filtered };
 			}
 		} catch {
 			// Don't break the agent start if skill filtering fails

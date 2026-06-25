@@ -6,6 +6,7 @@ import { clearDiscoveryCache, discoverInstalledResourcesCached } from "./discove
 import { confirmInstall, emit, formatBrowseList, formatHelp, formatMarketplaceList, formatPluginList } from "./format.js";
 import { installPluginFromMarketplace, uninstallPlugin } from "./installer.js";
 import { addMarketplace, findMarketplacePlugin, listMarketplacePlugins, refreshMarketplace } from "./marketplace.js";
+import { setGlobalSkillPolicy, setGlobalSourcePolicy } from "./skill-policy.js";
 import { buildSkillList, buildSourceList, discoverSkillsFromSources, formatSkillList, formatSkillsHelp, formatSourceList } from "./skills.js";
 import { CheckboxSelector, type CheckboxItem, type CheckboxResult } from "./checkbox.js";
 import { formatUpdateCheckResults, runUpdateCheck } from "./update-check.js";
@@ -259,7 +260,7 @@ export async function handleSkillsCommand(pi: ExtensionAPI, rawArgs: string, ctx
 		const config = await readConfig();
 		const pluginSkillPaths = await getPluginSkillPaths(ctx.cwd);
 		const customSkillPaths = await discoverSkillsFromSources(config.skillSources ?? []);
-		const skills = await buildSkillList(pi, pluginSkillPaths, customSkillPaths, state.disabledSkills, state.disabledSkillSources, ctx.cwd);
+		const skills = await buildSkillList(pi, pluginSkillPaths, customSkillPaths, state.skillPolicy, ctx.cwd, config.skillSources ?? []);
 		await emit(pi, ctx, formatSkillList(skills));
 		return {};
 	}
@@ -269,7 +270,7 @@ export async function handleSkillsCommand(pi: ExtensionAPI, rawArgs: string, ctx
 		const config = await readConfig();
 		const pluginSkillPaths = await getPluginSkillPaths(ctx.cwd);
 		const customSkillPaths = await discoverSkillsFromSources(config.skillSources ?? []);
-		const skills = await buildSkillList(pi, pluginSkillPaths, customSkillPaths, state.disabledSkills, state.disabledSkillSources, ctx.cwd);
+		const skills = await buildSkillList(pi, pluginSkillPaths, customSkillPaths, state.skillPolicy, ctx.cwd, config.skillSources ?? []);
 
 		if (skills.length === 0) {
 			await emit(pi, ctx, "No managed skills found. Install plugins with skills or add skill source directories.");
@@ -314,11 +315,7 @@ export async function handleSkillsCommand(pi: ExtensionAPI, rawArgs: string, ctx
 				const newChecked = result.items[i]!.checked;
 				if (newChecked !== skill.enabled) {
 					changeCount++;
-					if (newChecked) {
-						delete state.disabledSkills[skill.path];
-					} else {
-						state.disabledSkills[skill.path] = true;
-					}
+					setGlobalSkillPolicy(state.skillPolicy, skill, newChecked ? "enabled" : "disabled");
 				}
 			}
 			if (changeCount === 0) {
@@ -337,11 +334,7 @@ export async function handleSkillsCommand(pi: ExtensionAPI, rawArgs: string, ctx
 
 		// Toggle
 		const newEnabled = !target.enabled;
-		if (newEnabled) {
-			delete state.disabledSkills[target.path];
-		} else {
-			state.disabledSkills[target.path] = true;
-		}
+		setGlobalSkillPolicy(state.skillPolicy, target, newEnabled ? "enabled" : "disabled");
 		await writeState(state);
 		clearRuntimeCaches();
 		await emit(pi, ctx, `${newEnabled ? "Enabled" : "Disabled"} skill: ${target.name}\npath: ${target.path}\n\nRun /reload or /plugin reload for the change to take effect.`);
@@ -376,8 +369,8 @@ export async function handleSkillsCommand(pi: ExtensionAPI, rawArgs: string, ctx
 			const state = await readState();
 			const pluginSkillPaths = await getPluginSkillPaths(ctx.cwd);
 			const customSkillPaths = await discoverSkillsFromSources(customSources);
-			const skills = await buildSkillList(pi, pluginSkillPaths, customSkillPaths, state.disabledSkills, state.disabledSkillSources, ctx.cwd);
-			const sourceList = buildSourceList(skills, customSources, state.disabledSkillSources, ctx.cwd);
+			const skills = await buildSkillList(pi, pluginSkillPaths, customSkillPaths, state.skillPolicy, ctx.cwd, config.skillSources ?? []);
+			const sourceList = buildSourceList(skills, customSources, state.skillPolicy, ctx.cwd);
 			await emit(pi, ctx, formatSourceList(sourceList));
 			return {};
 		}
@@ -386,8 +379,8 @@ export async function handleSkillsCommand(pi: ExtensionAPI, rawArgs: string, ctx
 			const state = await readState();
 			const pluginSkillPaths = await getPluginSkillPaths(ctx.cwd);
 			const customSkillPaths = await discoverSkillsFromSources(customSources);
-			const skills = await buildSkillList(pi, pluginSkillPaths, customSkillPaths, state.disabledSkills, state.disabledSkillSources, ctx.cwd);
-			const sourceList = buildSourceList(skills, customSources, state.disabledSkillSources, ctx.cwd);
+			const skills = await buildSkillList(pi, pluginSkillPaths, customSkillPaths, state.skillPolicy, ctx.cwd, config.skillSources ?? []);
+			const sourceList = buildSourceList(skills, customSources, state.skillPolicy, ctx.cwd);
 
 			if (sourceList.length === 0) {
 				await emit(pi, ctx, "No skill sources found.");
@@ -418,11 +411,7 @@ export async function handleSkillsCommand(pi: ExtensionAPI, rawArgs: string, ctx
 					const newChecked = result.items[i]!.checked;
 					if (newChecked !== source.enabled) {
 						changeCount++;
-						if (newChecked) {
-							delete state.disabledSkillSources[source.path];
-						} else {
-							state.disabledSkillSources[source.path] = true;
-						}
+						setGlobalSourcePolicy(state.skillPolicy, source.path, newChecked ? "enabled" : "disabled");
 					}
 				}
 				if (changeCount === 0) {
@@ -440,11 +429,7 @@ export async function handleSkillsCommand(pi: ExtensionAPI, rawArgs: string, ctx
 			if (!target) return {};
 
 			const newEnabled = !target.enabled;
-			if (newEnabled) {
-				delete state.disabledSkillSources[target.path];
-			} else {
-				state.disabledSkillSources[target.path] = true;
-			}
+			setGlobalSourcePolicy(state.skillPolicy, target.path, newEnabled ? "enabled" : "disabled");
 			await writeState(state);
 			clearRuntimeCaches();
 			await emit(pi, ctx, `${newEnabled ? "Enabled" : "Disabled"} source: ${target.path} (${target.skillCount} skill${target.skillCount === 1 ? "" : "s"})\n\nRun /reload or /plugin reload for the change to take effect.`);

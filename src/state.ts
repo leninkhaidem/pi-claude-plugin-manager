@@ -3,6 +3,7 @@ import path from "node:path";
 import { getAgentDir } from "@mariozechner/pi-coding-agent";
 import { DEFAULT_CLAUDE_DIR, STATE_VERSION } from "./constants.js";
 import { exists, readJsonFile } from "./fs-utils.js";
+import { defaultSkillPolicy, disabledSkillPathRecordForCompatibility, disabledSourcePathRecordForCompatibility, normalizeSkillPolicy } from "./skill-policy.js";
 import type { ManagerConfig, ResolvedManagerConfig, State } from "./types.js";
 import { normalizePath } from "./utils.js";
 
@@ -34,6 +35,7 @@ export function defaultState(): State {
 		enabledPlugins: {},
 		disabledSkills: {},
 		disabledSkillSources: {},
+		skillPolicy: defaultSkillPolicy(),
 	};
 }
 
@@ -48,15 +50,17 @@ export async function readState(): Promise<State> {
 	if (!(await exists(statePath()))) return defaultState();
 	try {
 		const parsed = await readJsonFile<Partial<State>>(statePath());
+		const skillPolicy = normalizeSkillPolicy(parsed.skillPolicy, parsed.disabledSkills, parsed.disabledSkillSources);
 		return {
 			version: STATE_VERSION,
-			marketplaces: parsed.marketplaces ?? {},
-			plugins: parsed.plugins ?? {},
-			enabledPlugins: parsed.enabledPlugins ?? {},
-			disabledSkills: parsed.disabledSkills ?? {},
-			disabledSkillSources: parsed.disabledSkillSources ?? {},
-			lastUpdateCheckAt: parsed.lastUpdateCheckAt,
-			lastUpdateCheckResults: parsed.lastUpdateCheckResults,
+			marketplaces: isRecord(parsed.marketplaces) ? parsed.marketplaces : {},
+			plugins: isRecord(parsed.plugins) ? parsed.plugins : {},
+			enabledPlugins: isRecord(parsed.enabledPlugins) ? parsed.enabledPlugins : {},
+			disabledSkills: disabledSkillPathRecordForCompatibility(skillPolicy),
+			disabledSkillSources: disabledSourcePathRecordForCompatibility(skillPolicy),
+			skillPolicy,
+			lastUpdateCheckAt: typeof parsed.lastUpdateCheckAt === "string" ? parsed.lastUpdateCheckAt : undefined,
+			lastUpdateCheckResults: isRecord(parsed.lastUpdateCheckResults) ? parsed.lastUpdateCheckResults : undefined,
 		};
 	} catch (error) {
 		throw new Error(`Failed to read ${statePath()}: ${(error as Error).message}`);
@@ -64,8 +68,19 @@ export async function readState(): Promise<State> {
 }
 
 export async function writeState(state: State): Promise<void> {
+	const persisted: State = {
+		...state,
+		version: STATE_VERSION,
+		skillPolicy: normalizeSkillPolicy(state.skillPolicy, {}, {}),
+		disabledSkills: {},
+		disabledSkillSources: {},
+	};
 	await mkdir(stateDir(), { recursive: true });
-	await writeFile(statePath(), `${JSON.stringify(state, null, 2)}\n`, "utf8");
+	await writeFile(statePath(), `${JSON.stringify(persisted, null, 2)}\n`, "utf8");
+}
+
+function isRecord(value: unknown): value is Record<string, never> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export async function readConfig(): Promise<ManagerConfig> {
