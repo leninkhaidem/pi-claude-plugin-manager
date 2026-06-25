@@ -1,0 +1,36 @@
+{
+  "feature": "manage-skills",
+  "title": "Manage Skills",
+  "status": "reviewed",
+  "spec_path": ".tasks/manage-skills/SPEC.md",
+  "authoritative_slices": [
+    ".planning/skill-management-scope/slices/enforcement-and-scope.md",
+    ".planning/skill-management-scope/slices/manage-skills-tui.md"
+  ],
+  "work_packages": [
+    {
+      "id": "WP1",
+      "path": ".tasks/manage-skills/packages/WP1.md",
+      "proof_path": ".tasks/manage-skills/proofs/WP1.proof.md",
+      "report_path": ".tasks/manage-skills/reports/WP1.package-verification.md",
+      "status": "pending",
+      "depends_on": []
+    },
+    {
+      "id": "WP2",
+      "path": ".tasks/manage-skills/packages/WP2.md",
+      "proof_path": ".tasks/manage-skills/proofs/WP2.proof.md",
+      "report_path": ".tasks/manage-skills/reports/WP2.package-verification.md",
+      "status": "pending",
+      "depends_on": ["WP1"]
+    },
+    {
+      "id": "WP3",
+      "path": ".tasks/manage-skills/packages/WP3.md",
+      "proof_path": ".tasks/manage-skills/proofs/WP3.proof.md",
+      "report_path": ".tasks/manage-skills/reports/WP3.package-verification.md",
+      "status": "pending",
+      "depends_on": ["WP1", "WP2"]
+    }
+  ]
+}
