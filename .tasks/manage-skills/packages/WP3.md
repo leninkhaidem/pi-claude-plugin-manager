@@ -35,7 +35,7 @@ Must satisfy:
 
 ## Verification Expectations
 - Before implementing or verifying the TUI, load and apply `/home/lenin/.pi/pi-tui-widget-reference.md`; the interactive manager must use Pi's documented TUI component model/widgets/utilities such as `ctx.ui.custom()`, `Component`, keyboard helpers, and visible-width/truncation utilities rather than ad hoc static terminal output.
-- Add and run focused TUI component tests with a mocked Pi UI/TUI host proving keyboard navigation, search/filter over the full list, table toggle/cycle, immediate save calls, detail open/back, and escape/return behavior without focus traps.
+- Add and run focused TUI component tests with a mocked Pi UI/TUI host proving keyboard navigation, search/filter over the full list, table toggle/cycle, immediate save calls, detail view/back navigation, and escape/return behavior without focus traps.
 - Verify save-failure behavior: failed policy writes surface an error, do not show durable success, and do not let Escape/back hide unsaved policy state as if it had persisted.
 - Verify main table rows include skill name, global default, this-folder override (`inherit`, `enabled`, `disabled`), effective state, winning scope, and a hidden/blocked/filtering enforcement indication where useful, and do not render descriptions as row text.
 - Verify detail view renders full description or a clear `(no description)` placeholder, source/package label, file path, global default, started-folder override, effective state and winning scope, enforcement mode, and actions for changing global state, changing/clearing folder override, and source-related state changes.
