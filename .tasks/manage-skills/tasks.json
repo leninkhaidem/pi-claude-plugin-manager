@@ -31,7 +31,7 @@
       "path": ".tasks/manage-skills/packages/WP3.md",
       "proof_path": ".tasks/manage-skills/proofs/WP3.proof.md",
       "report_path": ".tasks/manage-skills/reports/WP3.package-verification.md",
-      "status": "pending",
+      "status": "done",
       "depends_on": [
         "WP1",
         "WP2"
