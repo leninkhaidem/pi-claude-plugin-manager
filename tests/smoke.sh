@@ -126,6 +126,7 @@ run_pi() {
 
 run_pi "/plugin config set claudeReadOnlyImports false" >/dev/null
 run_pi "/plugin help" | grep -q "/plugin browse \[marketplace\]"
+run_pi "/manage-skills help" | grep -q "/manage-skills status"
 run_pi "/plugin marketplace add $MARKETPLACE" | grep -q "Added marketplace fixture-marketplace"
 run_pi "/plugin marketplace list" | grep -q "fixture-marketplace"
 run_pi "/plugin browse fixture-marketplace" | grep -q "/plugin install demo@fixture-marketplace"
@@ -195,6 +196,7 @@ JITI_FS_CACHE="$TMP/jiti-cache" PI_CODING_AGENT_DIR="$AGENT" node --import "$JIT
 JITI_FS_CACHE="$TMP/jiti-cache" PI_CODING_AGENT_DIR="$AGENT" node --import "$JITI_REGISTER" "$ROOT/tests/marketplace-refresh-diverged.mjs" | grep -q "marketplace refresh diverged smoke ok"
 JITI_FS_CACHE="$TMP/jiti-cache" node --import "$JITI_REGISTER" "$ROOT/tests/update-version-reporting.mjs" | grep -q "update version reporting smoke ok"
 JITI_FS_CACHE="$TMP/jiti-cache" node --import "$JITI_REGISTER" "$ROOT/tests/skill-policy.mjs" | grep -q "skill policy tests ok"
+JITI_FS_CACHE="$TMP/jiti-cache" node --import "$JITI_REGISTER" "$ROOT/tests/manage-skills-enforcement.mjs" | grep -q "manage skills enforcement tests ok"
 
 run_pi "/plugin uninstall demo@fixture-marketplace" | grep -q "demo@fixture-marketplace (user)"
 run_pi "/plugin uninstall browse-demo@fixture-marketplace" | grep -q "browse-demo@fixture-marketplace (user)"

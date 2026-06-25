@@ -1,12 +1,13 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { syncAgentSymlinks } from "./agents.js";
-import { getPluginArgumentCompletions, getSkillsArgumentCompletions } from "./autocomplete.js";
+import { getManageSkillsArgumentCompletions, getPluginArgumentCompletions } from "./autocomplete.js";
 import { CUSTOM_MESSAGE_TYPE } from "./constants.js";
 import { claudePluginEntriesForCwd, clearDiscoveryCache, discoverInstalledResourcesCached, installedEntriesForCwd, piManagedKeysForCwd } from "./discovery.js";
 import { emit } from "./format.js";
-import { handleCommand, handleSkillsCommand } from "./commands.js";
+import { handleCommand, handleManageSkillsCommand } from "./commands.js";
 import { installPluginFromMarketplace } from "./installer.js";
+import { evaluateSkillInvocationBlock } from "./enforcement.js";
 import { filterSkillsFromPromptByPolicy } from "./skills.js";
 import { readConfig, readState, writeState } from "./state.js";
 import { isUpdateCheckDue, runUpdateCheck } from "./update-check.js";
@@ -32,12 +33,12 @@ export default function claudePluginManager(pi: ExtensionAPI) {
 		},
 	});
 
-	pi.registerCommand("skills", {
-		description: "Manage skills from plugins and custom source directories",
-		getArgumentCompletions: getSkillsArgumentCompletions,
+	pi.registerCommand("manage-skills", {
+		description: "Manage skill enablement and enforcement policy",
+		getArgumentCompletions: getManageSkillsArgumentCompletions,
 		handler: async (args, ctx) => {
 			try {
-				const result = await handleSkillsCommand(pi, args, ctx);
+				const result = await handleManageSkillsCommand(pi, args, ctx);
 				if (result.reloadRecommended && ctx.hasUI) {
 					ctx.ui.notify("Run /reload when ready to apply changes.", "info");
 				}
@@ -52,14 +53,26 @@ export default function claudePluginManager(pi: ExtensionAPI) {
 	});
 
 	pi.on("before_agent_start", async (event) => {
+		const state = await readState();
+		const config = await readConfig();
+		const filtered = filterSkillsFromPromptByPolicy(event.systemPrompt, state.skillPolicy, (event as { cwd?: string }).cwd, config.skillSources ?? []);
+		if (filtered !== event.systemPrompt) {
+			return { systemPrompt: filtered };
+		}
+	});
+
+	pi.on("input", async (event, ctx) => {
+		if (!event.text.trimStart().startsWith("/skill:")) return { action: "continue" };
 		try {
 			const state = await readState();
-			const filtered = filterSkillsFromPromptByPolicy(event.systemPrompt, state.skillPolicy, (event as { cwd?: string }).cwd);
-			if (filtered !== event.systemPrompt) {
-				return { systemPrompt: filtered };
-			}
-		} catch {
-			// Don't break the agent start if skill filtering fails
+			const config = await readConfig();
+			const block = evaluateSkillInvocationBlock(pi, state.skillPolicy, ctx.cwd, event.text, config.skillSources ?? []);
+			if (!block.blocked) return { action: "continue" };
+			await emit(pi, ctx, `Blocked /skill invocation. ${block.reason ?? "Skill invocation is not allowed."}`);
+			return { action: "handled" };
+		} catch (error) {
+			await emit(pi, ctx, `Blocked /skill invocation because skill policy could not be read: ${(error as Error).message}`);
+			return { action: "handled" };
 		}
 	});
 

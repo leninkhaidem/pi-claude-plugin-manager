@@ -354,7 +354,7 @@ export function buildSourceList(
 
 export function formatSkillList(skills: SkillInfo[]): string {
 	if (skills.length === 0) {
-		return "No skills found. Install plugins with skills or add skill source directories with `/skills sources add <path>`.";
+		return "No skills found. Install plugins with skills or add skill source directories with `/plugin config set skillSources <paths>`.";
 	}
 
 	const lines = ["# All skills", ""];
@@ -419,27 +419,27 @@ export function formatSourceList(sources: SkillSourceInfo[]): string {
 	}
 
 	// Show note about available actions
-	lines.push("Use `/skills sources toggle` to enable/disable a source.");
-	lines.push("Use `/skills sources add <path>` to add a custom source.");
+	lines.push("Use `/manage-skills` to inspect source policy status.");
+	lines.push("Use `/plugin config set skillSources <paths>` to add a custom source.");
 
 	return lines.join("\n");
 }
 
 export function formatSkillsHelp(): string {
-	return `# /skills — Skill manager
+	return `# /manage-skills — Skill manager
 
 Manage skills from all sources: Pi-native, plugins, and custom directories.
 Toggle individual skills or entire source directories on/off.
 
 ## Commands
-/skills                              # Interactive menu (TUI) or list skills
-/skills list                         # List all skills with status
-/skills toggle [skill-name]          # Toggle a skill on/off
-/skills sources                      # List all skill sources with status
-/skills sources toggle [source-path] # Toggle an entire source on/off
-/skills sources add <path>           # Add a custom source directory
-/skills sources remove [path]        # Remove a custom source directory
-/skills help                         # Show this help
+/manage-skills                       # Compact status or interactive manager when available
+/manage-skills status                # Compact skill policy status
+/manage-skills                       # Toggle skills in the interactive TUI when available
+/manage-skills status                # Include source policy summary
+/manage-skills                       # Manage source policy from the interactive TUI when available
+/plugin config set skillSources <paths> # Configure custom source directories
+/plugin config set skillSources <paths> # Remove paths by setting the desired list
+/manage-skills help                  # Show this help
 
 ## Skill sources
 Pi discovers skills from built-in paths:
@@ -451,15 +451,15 @@ Pi discovers skills from built-in paths:
 
 This extension also discovers skills from:
   - Claude Code plugin marketplaces
-  - Custom source directories (see /skills sources add)
+  - Custom source directories (see /plugin config set skillSources)
 
 ## Toggling skills
 Toggle individual skills or entire source directories.
 Disabled skills are stripped from the system prompt.
 
-/skills toggle                       # Interactive select in TUI
-/skills toggle my-skill              # Toggle by skill name
-/skills sources toggle               # Interactive source toggle in TUI
+/manage-skills                       # Interactive table in TUI-capable builds
+/manage-skills status                # Compact status in non-TUI mode
+/manage-skills                       # Source controls live in the interactive detail view
 
 This works for ALL skills — Pi-native, plugin, and custom source.`;
 }
@@ -492,7 +492,7 @@ export function filterDisabledSkillsFromPrompt(
 	});
 }
 
-export function filterSkillsFromPromptByPolicy(systemPrompt: string, policy: SkillPolicy, cwd?: string): string {
+export function filterSkillsFromPromptByPolicy(systemPrompt: string, policy: SkillPolicy, cwd?: string, customSourceRoots: string[] = []): string {
 	return systemPrompt.replace(/<skill>\s*\n([\s\S]*?)<\/skill>/g, (match, inner: string) => {
 		const locationMatch = inner.match(/<location>(.*?)<\/location>/);
 		const nameMatch = inner.match(/<name>(.*?)<\/name>/);
@@ -500,7 +500,7 @@ export function filterSkillsFromPromptByPolicy(systemPrompt: string, policy: Ski
 		const skillPath = rawPath ? normalizePath(rawPath) : undefined;
 		const name = nameMatch?.[1]?.trim() || (skillPath ? path.basename(path.dirname(skillPath)) : "");
 		if (!name) return match;
-		const sourceRoot = skillPath ? sourceRootForSkillPath(skillPath, { cwd }).sourceRoot : undefined;
+		const sourceRoot = skillPath ? sourceRootForSkillPath(skillPath, { cwd, customSourceRoots }).sourceRoot : undefined;
 		return evaluateSkillPolicy(policy, { name, path: skillPath, sourceRoot }, cwd).enabled ? match : "";
 	});
 }

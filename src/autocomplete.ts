@@ -8,18 +8,9 @@ import { parsePluginSpec, pluginKey, splitArgs } from "./utils.js";
 
 export { PLUGIN_AUTOCOMPLETE_LIMIT, PLUGIN_BROWSE_SELECT_LIMIT };
 
-const SKILLS_TOP_LEVEL_COMMANDS = [
-	{ value: "help", description: "Show /skills help" },
-	{ value: "list", description: "List all managed skills with status" },
-	{ value: "toggle", description: "Toggle a skill on or off" },
-	{ value: "sources", description: "Manage skill source directories" },
-];
-
-const SKILLS_SOURCES_COMMANDS = [
-	{ value: "list", description: "List all skill sources with status" },
-	{ value: "toggle", description: "Toggle a skill source on/off" },
-	{ value: "add", description: "Add a custom skill source directory" },
-	{ value: "remove", description: "Remove a custom skill source directory" },
+const MANAGE_SKILLS_TOP_LEVEL_COMMANDS = [
+	{ value: "help", description: "Show /manage-skills help" },
+	{ value: "status", description: "Show compact skill policy status" },
 ];
 
 const TOP_LEVEL_COMMANDS = [
@@ -169,37 +160,12 @@ function flagItems(flags: string[]): Array<{ value: string; description?: string
 	return flags.map((flag) => ({ value: flag }));
 }
 
-export async function getSkillsArgumentCompletions(argumentPrefix: string): Promise<AutocompleteItem[] | null> {
+export async function getManageSkillsArgumentCompletions(argumentPrefix: string): Promise<AutocompleteItem[] | null> {
 	try {
 		const parsedPrefix = parseCompletionPrefix(argumentPrefix);
 		if (!parsedPrefix) return null;
-		const { tokens, current, before } = parsedPrefix;
-		const command = tokens[0] ?? "";
-
-		if (before.length === 0) return makeItems([], current, SKILLS_TOP_LEVEL_COMMANDS);
-
-		if (command === "sources") {
-			if (before.length === 1) return makeItems(before, current, SKILLS_SOURCES_COMMANDS);
-			return null;
-		}
-
-		if (command === "toggle" && before.length === 1) {
-			const state = await readState();
-			const disabledSkillKeys = [
-				...Object.keys(state.skillPolicy.global.skills).filter((key) => state.skillPolicy.global.skills[key] === "disabled"),
-				...Object.keys(state.skillPolicy.global.names).filter((key) => state.skillPolicy.global.names[key] === "disabled"),
-			];
-			// We can't easily list all skill names here without full discovery,
-			// but we can suggest disabled skill paths/names for re-enabling.
-			if (disabledSkillKeys.length > 0) {
-				return makeItems(before, current, disabledSkillKeys.map((p) => {
-					const name = p.includes("/") ? (p.split("/").slice(-2, -1)[0] ?? p) : p;
-					return { value: name, description: "disabled" };
-				}));
-			}
-			return null;
-		}
-
+		const { current, before } = parsedPrefix;
+		if (before.length === 0) return makeItems([], current, MANAGE_SKILLS_TOP_LEVEL_COMMANDS);
 		return null;
 	} catch {
 		return null;
