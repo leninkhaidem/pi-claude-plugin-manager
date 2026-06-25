@@ -164,14 +164,13 @@ function ensureFolderRuleSet(policy: SkillPolicy, startedFolder: string): SkillP
 
 function findRule(rules: SkillPolicyRuleSet | undefined, subject: SkillPolicySubject): { state: SkillPolicyValue; target: "skill" | "source" | "name" } | undefined {
 	if (!rules) return undefined;
+	const sourceRule = subject.sourceRoot ? rules.sources[normalizePath(subject.sourceRoot)] : undefined;
+	if (sourceRule === "disabled") return { state: sourceRule, target: "source" };
 	if (subject.path) {
 		const skillRule = rules.skills[normalizePath(subject.path)];
 		if (skillRule) return { state: skillRule, target: "skill" };
 	}
-	if (subject.sourceRoot) {
-		const sourceRule = rules.sources[normalizePath(subject.sourceRoot)];
-		if (sourceRule) return { state: sourceRule, target: "source" };
-	}
+	if (sourceRule) return { state: sourceRule, target: "source" };
 	const nameRule = rules.names[subject.name];
 	if (nameRule) return { state: nameRule, target: "name" };
 	return undefined;

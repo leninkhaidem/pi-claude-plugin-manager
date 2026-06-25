@@ -53,6 +53,7 @@ export function evaluateSkillInvocationBlock(pi: ExtensionAPI, policy: SkillPoli
 			matchedPaths: disabledMatches.map((match) => match.path).filter((path): path is string => Boolean(path)),
 		};
 	}
+	if (commandMatches.length > 0) return { blocked: false, name };
 
 	const nameOnly = evaluateSkillPolicy(policy, { name }, cwd);
 	if (!nameOnly.enabled) return { blocked: true, name, reason: `Skill is disabled by policy: ${name}` };

@@ -55,11 +55,12 @@ try {
 	assert.ok(resources.skillPaths.includes(alpha), "re-enabled manager-owned skill path reappears after cache/reload semantics");
 
 	state = defaultState();
+	setGlobalSkillPolicy(state.skillPolicy, { name: "alpha", path: alpha, sourceRoot }, "enabled");
 	setGlobalSourcePolicy(state.skillPolicy, sourceRoot, "disabled");
 	await writeState(state);
 	clearDiscoveryCache();
 	resources = await discoverInstalledResourcesCached(tmp);
-	assert.deepEqual(resources.skillPaths, [], "disabled source omits every managed skill under the source");
+	assert.deepEqual(resources.skillPaths, [], "disabled source omits every managed skill under the source and dominates same-scope path enables");
 
 	let policy = defaultSkillPolicy();
 	setGlobalSkillPolicy(policy, { name: "alpha", path: alpha, sourceRoot }, "disabled");
@@ -71,9 +72,10 @@ try {
 	assert.equal(filtered.includes("<name>beta</name>"), true, "prompt filter keeps enabled skills");
 
 	policy = defaultSkillPolicy();
+	setGlobalSkillPolicy(policy, { name: "alpha", path: alpha, sourceRoot }, "enabled");
 	setGlobalSourcePolicy(policy, sourceRoot, "disabled");
 	filtered = filterSkillsFromPromptByPolicy(prompt, policy, tmp, [sourceRoot]);
-	assert.equal(filtered.includes("<name>alpha</name>"), false, "prompt filter removes by source root");
+	assert.equal(filtered.includes("<name>alpha</name>"), false, "prompt filter removes by source root even with same-scope path enable");
 	assert.equal(filtered.includes("<name>beta</name>"), false, "source-level prompt filtering applies to all skills under source");
 
 	assert.deepEqual(parseSkillInvocation("ask about /skill:alpha"), { kind: "not-skill" });
@@ -99,8 +101,15 @@ try {
 	assert.equal(evaluateSkillInvocationBlock(pi, policy, tmp, "/skill:ctx-indexing").blocked, false, "substring names do not false-positive");
 	assert.equal(evaluateSkillInvocationBlock(pi, policy, tmp, "/skill:shared").blocked, true, "duplicate slash name is blocked when any same-name row is disabled");
 	assert.equal(evaluateSkillInvocationBlock(pi, policy, tmp, "/skill:enabled").blocked, false, "enabled skill invocation continues");
+	const staleNamePolicy = defaultSkillPolicy();
+	setGlobalSkillPolicy(staleNamePolicy, { name: "alpha" }, "disabled");
+	setGlobalSkillPolicy(staleNamePolicy, { name: "alpha", path: alpha, sourceRoot }, "enabled");
+	filtered = filterSkillsFromPromptByPolicy(prompt, staleNamePolicy, tmp, [sourceRoot]);
+	assert.equal(filtered.includes("<name>alpha</name>"), true, "path-enabled skill remains in prompt despite stale name disable");
+	assert.equal(evaluateSkillInvocationBlock(pi, staleNamePolicy, tmp, "/skill:alpha", [sourceRoot]).blocked, false, "path-enabled command is not blocked by stale name-only fallback");
+	setGlobalSkillPolicy(policy, { name: "alpha", path: alpha, sourceRoot }, "enabled");
 	setGlobalSourcePolicy(policy, sourceRoot, "disabled");
-	assert.equal(evaluateSkillInvocationBlock(pi, policy, tmp, "/skill:alpha", [sourceRoot]).blocked, true, "source-disabled loaded skill invocation is blocked by source root");
+	assert.equal(evaluateSkillInvocationBlock(pi, policy, tmp, "/skill:alpha", [sourceRoot]).blocked, true, "source-disabled loaded skill invocation is blocked by source root even with same-scope path enable");
 	assert.equal(evaluateSkillInvocationBlock(pi, policy, tmp, "/skill:").blocked, true, "empty skill invocation fails closed");
 	assert.equal(evaluateSkillInvocationBlock(pi, policy, tmp, "/skill:bad/name").blocked, true, "malformed skill invocation fails closed");
 

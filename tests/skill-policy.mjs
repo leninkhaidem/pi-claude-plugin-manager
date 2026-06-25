@@ -21,6 +21,7 @@ try {
 		evaluateSkillPolicy,
 		normalizeStartedFolderKey,
 		setFolderSkillPolicy,
+		setFolderSourcePolicy,
 		setGlobalSkillPolicy,
 		setGlobalSourcePolicy,
 	} = policyModule;
@@ -83,6 +84,23 @@ try {
 	assert.equal(sameFolder.winningScope, "folder");
 	assert.equal(evaluateSkillPolicy(policy, subject, path.join(tmp, "other")).effectiveState, "disabled");
 	assert.equal(JSON.stringify(policy).includes("effectiveState"), false, "effective state is derived, not persisted in policy");
+
+	const sourcePrecedence = defaultSkillPolicy();
+	const sourcePrecedenceSubject = { name: "source-precedence", path: path.join(tmp, "source-precedence", "source-precedence", "SKILL.md"), sourceRoot: path.join(tmp, "source-precedence") };
+	setGlobalSkillPolicy(sourcePrecedence, sourcePrecedenceSubject, "enabled");
+	setGlobalSourcePolicy(sourcePrecedence, sourcePrecedenceSubject.sourceRoot, "disabled");
+	let sourcePrecedenceResult = evaluateSkillPolicy(sourcePrecedence, sourcePrecedenceSubject, tmp);
+	assert.equal(sourcePrecedenceResult.effectiveState, "disabled", "global source disable dominates same-scope path enable");
+	assert.equal(sourcePrecedenceResult.winningTarget, "source");
+	const sourceNamePrecedenceSubject = { name: "source-name-precedence", path: path.join(sourcePrecedenceSubject.sourceRoot, "source-name-precedence", "SKILL.md"), sourceRoot: sourcePrecedenceSubject.sourceRoot };
+	setGlobalSkillPolicy(sourcePrecedence, { name: sourceNamePrecedenceSubject.name }, "enabled");
+	assert.equal(evaluateSkillPolicy(sourcePrecedence, sourceNamePrecedenceSubject, tmp).effectiveState, "disabled", "global source disable dominates same-scope name enable when source identity is known");
+	setFolderSkillPolicy(sourcePrecedence, tmp, sourcePrecedenceSubject, "enabled");
+	setFolderSourcePolicy(sourcePrecedence, tmp, sourcePrecedenceSubject.sourceRoot, "disabled");
+	sourcePrecedenceResult = evaluateSkillPolicy(sourcePrecedence, sourcePrecedenceSubject, tmp);
+	assert.equal(sourcePrecedenceResult.effectiveState, "disabled", "folder source disable dominates same-scope path enable");
+	assert.equal(sourcePrecedenceResult.winningScope, "folder");
+	assert.equal(sourcePrecedenceResult.winningTarget, "source");
 
 	const dupRootA = path.join(tmp, "dup-a");
 	const dupRootB = path.join(tmp, "dup-b");
