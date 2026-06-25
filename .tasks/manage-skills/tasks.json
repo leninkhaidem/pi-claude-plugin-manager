@@ -21,7 +21,7 @@
       "path": ".tasks/manage-skills/packages/WP2.md",
       "proof_path": ".tasks/manage-skills/proofs/WP2.proof.md",
       "report_path": ".tasks/manage-skills/reports/WP2.package-verification.md",
-      "status": "pending",
+      "status": "done",
       "depends_on": [
         "WP1"
       ]
