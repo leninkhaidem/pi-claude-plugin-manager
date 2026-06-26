@@ -268,7 +268,7 @@ async function loadManageSkillsInventory(pi: ExtensionAPI, cwd: string): Promise
 
 async function runManageSkillsTui(pi: ExtensionAPI, ctx: ExtensionCommandContext): Promise<CommandResult> {
 	const { state, skills, sources } = await loadManageSkillsInventory(pi, ctx.cwd);
-	const result = await ctx.ui.custom<ManageSkillsTuiResult>((tui, _theme, _keybindings, done) => createManageSkillsTui({
+	const result = await ctx.ui.custom<ManageSkillsTuiResult>((tui, theme, _keybindings, done) => createManageSkillsTui({
 		cwd: ctx.cwd,
 		skills,
 		sources,
@@ -276,6 +276,7 @@ async function runManageSkillsTui(pi: ExtensionAPI, ctx: ExtensionCommandContext
 		saveState: writeState,
 		done,
 		tui,
+		theme,
 		onSaved: clearRuntimeCaches,
 	}), {
 		overlay: true,

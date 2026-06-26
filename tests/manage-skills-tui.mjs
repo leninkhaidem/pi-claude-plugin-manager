@@ -38,6 +38,12 @@ function simulateOverlayLifecycle(host, component) {
 	host.setFocus(preFocus);
 }
 
+const ansiTheme = {
+	fg: (_color, text) => `\x1b[36m${text}\x1b[0m`,
+	bg: (_color, text) => `\x1b[7m${text}\x1b[0m`,
+	bold: (text) => `\x1b[1m${text}\x1b[0m`,
+};
+
 try {
 	const stateModuleRaw = await import(path.join(repoRoot, "src/state.ts"));
 	const skillsModuleRaw = await import(path.join(repoRoot, "src/skills.ts"));
@@ -51,10 +57,11 @@ try {
 
 	const sourceRoot = path.join(tmp, "skills");
 	const paths = [];
-	paths.push(skillFile(sourceRoot, "alpha", "alpha", "Alpha full description that belongs only in detail view."));
+	paths.push(skillFile(sourceRoot, "alpha", "alpha", "Alpha full description that belongs only in the detail pane. This long description has enough words to wrap across many lines in the bounded full description drawer so keyboard scrolling can reveal the final tail marker after several down-arrow presses. TAIL-MARKER-ALPHA-DESCRIPTION"));
 	paths.push(skillFile(sourceRoot, "empty", "empty", ""));
 	for (let i = 0; i < 18; i++) paths.push(skillFile(sourceRoot, `skill-${i}`, `skill-${i}`, `Description ${i}`));
 	paths.push(skillFile(sourceRoot, "special", "special-skill", "Special searchable description"));
+	paths.push(skillFile(sourceRoot, "description-only", "boring-name", "Needle only appears in this description"));
 
 	const pi = { getCommands: () => [] };
 	let state = defaultState();
@@ -87,57 +94,87 @@ try {
 	simulateOverlayLifecycle(overlayHost, overlayComponent);
 	assert.equal(overlayHost.focused, editorFocusTarget, "overlay close restores the prior editor focus target");
 
-	let table = renderText(component, 110);
-	assert.match(table, /Skill\s+Global\*?\s+This folder\*?\s+Effective\s+Scope\s+Enforce/, "table has required policy columns");
-	assert.match(table, /showing 1-10 of 21 matching skills/, "long list is bounded with result count");
-	assert.ok(!table.includes("Alpha full description"), "main table does not render descriptions");
-	assertWidthSafe(component, [50, 110]);
+	let dashboard = renderText(component, 120);
+	assert.match(dashboard, /Skill Manager/, "dashboard has a modal title");
+	assert.match(dashboard, /Search all 22 skills/, "search field advertises full-inventory scope");
+	assert.match(dashboard, /Skill\s+G\s+F\s+Eff\s+Source/, "skill table has compact policy columns");
+	assert.match(dashboard, /1-6 of 22 matching skills/, "long list is bounded with result count");
+	assert.ok(component.render(72).length <= 19, "80-col terminal at 90% overlay width keeps footer inside a 24-row 80% height cap");
+	assert.ok(component.render(54).length <= 19, "60-col terminal at 90% overlay width keeps footer inside a 24-row 80% height cap");
+	assert.ok(component.render(90).length <= 19, "100-col terminal at 90% overlay width keeps footer inside a 24-row 80% height cap");
+	assert.match(dashboard, /Description/, "right detail pane is visible without opening a second page");
+	assert.match(dashboard, /Alpha full description/, "selected skill description appears in the detail pane");
+	assert.doesNotMatch(dashboard, /TAIL-MARKER-ALPHA-DESCRIPTION/, "dashboard detail preview stays compact");
+	const selectedAlphaLine = dashboard.split("\n").find((line) => line.includes("❯ alpha")) ?? "";
+	const leftPaneSegment = selectedAlphaLine.split("│")[1] ?? selectedAlphaLine;
+	assert.ok(!leftPaneSegment.includes("Alpha full description"), "skill table row does not inline descriptions");
+	assertWidthSafe(component, [50, 86, 120]);
+	component.handleInput("d");
+	let descriptionDrawer = renderText(component, 72);
+	assert.match(descriptionDrawer, /Description: alpha/, "d opens the full description drawer");
+	assert.ok(component.render(72).length <= 19, "description drawer keeps footer visible inside overlay cap");
+	for (let i = 0; i < 20; i++) component.handleInput("\x1B[B");
+	descriptionDrawer = renderText(component, 72);
+	assert.match(descriptionDrawer, /TAIL-MARKER-ALPHA-DESCRIPTION/, "full description drawer can scroll to the complete description tail");
+	component.handleInput("\x1B");
+	assert.match(renderText(component, 110), /Skill Manager/, "escape returns from full description drawer to dashboard");
+	const themedComponent = createManageSkillsTui({
+		cwd: tmp,
+		skills,
+		sources,
+		state,
+		saveState: async () => {},
+		done: () => {},
+		tui: makeHost(),
+		theme: ansiTheme,
+	});
+	assertWidthSafe(themedComponent, [50, 86, 120]);
 
 	component.handleInput("/");
 	for (const ch of "special") component.handleInput(ch);
 	component.handleInput("\r");
-	table = renderText(component, 100);
-	assert.match(table, /special-skill/, "search filters over the full list, not just visible rows");
-	assert.match(table, /showing 1-1 of 1 matching skills/, "search result count is shown");
+	dashboard = renderText(component, 110);
+	assert.match(dashboard, /special-skill/, "global search finds an off-screen skill by name");
+	assert.match(dashboard, /1-1 of 1 matching skills/, "search result count is shown");
+	assert.match(dashboard, /Special searchable description/, "detail pane follows the globally filtered selection");
 	component.handleInput("\r");
-	let detail = renderText(component, 100);
-	assert.match(detail, /Description/, "detail view has description section");
-	assert.match(detail, /Special searchable description/, "detail view renders full description");
-	assert.match(detail, /Source:/, "detail shows source label");
-	assert.match(detail, /Path:/, "detail shows path");
-	assert.match(detail, /Global default\s+enabled/, "detail shows global default");
-	assert.match(detail, /This folder\s+inherit/, "detail shows folder override");
-	assert.match(detail, /Effective state\s+enabled by global\/default/, "detail shows effective state and winner");
-	assert.match(detail, /Enforcement\s+active/, "detail shows enforcement mode");
-	assert.match(detail, /Disable this source globally/, "detail exposes source-related actions");
+	let drawer = renderText(component, 110);
+	assert.match(drawer, /Actions for special-skill/, "enter opens the action drawer");
+	assert.match(drawer, /Source: disable globally/, "action drawer exposes source-related actions");
 	component.handleInput("\x1B");
-	assert.match(renderText(component, 100), /Manage Skills/, "escape returns from detail to table");
+	assert.match(renderText(component, 110), /Skill Manager/, "escape returns from actions to dashboard");
 
 	component.handleInput("/");
 	for (let i = 0; i < "special".length; i++) component.handleInput("\x7f");
+	for (const ch of "Needle") component.handleInput(ch);
+	component.handleInput("\r");
+	dashboard = renderText(component, 110);
+	assert.match(dashboard, /boring-name/, "global search scans descriptions across all skills, not only visible rows");
+	assert.match(dashboard, /Needle only appears in this description/, "description-only match is selected in the detail pane");
+
+	component.handleInput("/");
+	for (let i = 0; i < "Needle".length; i++) component.handleInput("\x7f");
 	for (const ch of "alpha") component.handleInput(ch);
 	component.handleInput("\r");
 	component.handleInput(" ");
 	await component.waitForIdle();
-	assert.equal(savedStates.length, 1, "space cycle saves immediately");
+	assert.equal(savedStates.length, 1, "space cycle saves this-folder override immediately");
 	const folderRules = Object.values(savedStates.at(-1).skillPolicy.folders)[0];
-	assert.equal(folderRules.skills[paths[0]], "disabled", "table cycle writes selected skill folder override");
-	component.handleInput("\t");
-	component.handleInput(" ");
+	assert.equal(folderRules.skills[paths[0]], "disabled", "space writes selected skill folder override");
+	component.handleInput("g");
 	await component.waitForIdle();
-	assert.equal(savedStates.length, 2, "tab to global column plus space saves immediately");
-	assert.equal(savedStates.at(-1).skillPolicy.global.skills[paths[0]], "disabled", "global column cycle writes global default");
+	assert.equal(savedStates.length, 2, "g saves global default immediately");
+	assert.equal(savedStates.at(-1).skillPolicy.global.skills[paths[0]], "disabled", "g writes selected skill global default");
 
 	component.handleInput("/");
+	for (let i = 0; i < "alpha".length; i++) component.handleInput("\x7f");
 	for (const ch of "empty") component.handleInput(ch);
 	component.handleInput("\r");
-	component.handleInput("\r");
-	detail = renderText(component, 100);
-	assert.match(detail, /\(no description\)/, "missing descriptions render a clear placeholder");
+	dashboard = renderText(component, 100);
+	assert.match(dashboard, /\(no description\)/, "missing descriptions render a clear placeholder in the detail pane");
 	assertWidthSafe(component, [42, 120]);
 	component.handleInput("\x1B");
-	component.handleInput("\x1B");
-	assert.deepEqual(doneResult, { changed: true }, "escape exits table without rolling back saved changes");
+	assert.deepEqual(doneResult, { changed: true }, "escape exits dashboard without rolling back saved changes");
 
 	const failingState = defaultState();
 	skills = await buildSkillList(pi, paths.slice(0, 2), [], failingState.skillPolicy, tmp, [sourceRoot]);
