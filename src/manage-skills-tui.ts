@@ -16,7 +16,6 @@ export type ManageSkillsTuiResult = {
 
 type TuiHost = {
 	requestRender?: (force?: boolean) => void;
-	setFocus?: (component: Component | null) => void;
 };
 
 type ManageSkillsTuiOptions = {
@@ -471,9 +470,7 @@ export class ManageSkillsTui implements Component {
 }
 
 export function createManageSkillsTui(options: ManageSkillsTuiOptions): ManageSkillsTui {
-	const component = new ManageSkillsTui(options);
-	options.tui?.setFocus?.(component);
-	return component;
+	return new ManageSkillsTui(options);
 }
 
 function skillSubject(skill: SkillInfo): { name: string; path?: string; sourceRoot?: string } {

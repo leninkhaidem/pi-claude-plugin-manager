@@ -28,8 +28,14 @@ function assertWidthSafe(component, widths) {
 	}
 }
 
-function makeHost() {
-	return { renders: 0, focused: undefined, requestRender() { this.renders++; }, setFocus(component) { this.focused = component; } };
+function makeHost(initialFocus) {
+	return { renders: 0, focused: initialFocus, requestRender() { this.renders++; }, setFocus(component) { this.focused = component; } };
+}
+
+function simulateOverlayLifecycle(host, component) {
+	const preFocus = host.focused;
+	host.setFocus(component);
+	host.setFocus(preFocus);
 }
 
 try {
@@ -66,7 +72,20 @@ try {
 		done: (result) => { doneResult = result; },
 		tui: host,
 	});
-	assert.equal(host.focused, component, "component requests focus in custom TUI host");
+	assert.equal(host.focused, undefined, "component does not request focus before Pi mounts the overlay");
+	const editorFocusTarget = { name: "editor" };
+	const overlayHost = makeHost(editorFocusTarget);
+	const overlayComponent = createManageSkillsTui({
+		cwd: tmp,
+		skills,
+		sources,
+		state,
+		saveState: async () => {},
+		done: () => {},
+		tui: overlayHost,
+	});
+	simulateOverlayLifecycle(overlayHost, overlayComponent);
+	assert.equal(overlayHost.focused, editorFocusTarget, "overlay close restores the prior editor focus target");
 
 	let table = renderText(component, 110);
 	assert.match(table, /Skill\s+Global\*?\s+This folder\*?\s+Effective\s+Scope\s+Enforce/, "table has required policy columns");
