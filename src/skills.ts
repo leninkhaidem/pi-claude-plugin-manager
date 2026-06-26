@@ -36,6 +36,7 @@ export type SkillSourceInfo = {
 	folderState: FolderSkillPolicyValue;
 	effectiveState: SkillPolicyValue;
 	winningScope: "global" | "folder";
+	winningTarget: SkillPolicyEffectiveState["winningTarget"];
 };
 
 function parseFrontmatter(content: string): Record<string, string> {
@@ -340,6 +341,7 @@ export function buildSourceList(
 			folderState: effective.folderState,
 			effectiveState: effective.effectiveState,
 			winningScope: effective.winningScope,
+			winningTarget: effective.winningTarget,
 		});
 	}
 

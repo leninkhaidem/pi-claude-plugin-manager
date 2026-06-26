@@ -21,18 +21,21 @@ try {
 	const discoveryModuleRaw = await import(path.join(repoRoot, "src/discovery.ts"));
 	const skillsModuleRaw = await import(path.join(repoRoot, "src/skills.ts"));
 	const enforcementModuleRaw = await import(path.join(repoRoot, "src/enforcement.ts"));
+	const commandsModuleRaw = await import(path.join(repoRoot, "src/commands.ts"));
 	const extensionModuleRaw = await import(path.join(repoRoot, "src/index.ts"));
 	const stateModule = stateModuleRaw.default ?? stateModuleRaw;
 	const policyModule = policyModuleRaw.default ?? policyModuleRaw;
 	const discoveryModule = discoveryModuleRaw.default ?? discoveryModuleRaw;
 	const skillsModule = skillsModuleRaw.default ?? skillsModuleRaw;
 	const enforcementModule = enforcementModuleRaw.default ?? enforcementModuleRaw;
+	const commandsModule = commandsModuleRaw.default ?? commandsModuleRaw;
 	const extensionFactory = extensionModuleRaw.default?.default ?? extensionModuleRaw.default ?? extensionModuleRaw;
 	const { defaultState, writeConfig, writeState } = stateModule;
 	const { defaultSkillPolicy, setGlobalSkillPolicy, setGlobalSourcePolicy } = policyModule;
 	const { clearDiscoveryCache, discoverInstalledResourcesCached } = discoveryModule;
-	const { filterSkillsFromPromptByPolicy } = skillsModule;
+	const { buildSkillList, buildSourceList, filterSkillsFromPromptByPolicy } = skillsModule;
 	const { evaluateSkillInvocationBlock, parseSkillInvocation } = enforcementModule;
+	const { formatManageSkillsStatus } = commandsModule;
 
 	const sourceRoot = path.join(tmp, "custom-skills");
 	const alpha = skillFile(sourceRoot, "alpha", "alpha");
@@ -61,6 +64,13 @@ try {
 	clearDiscoveryCache();
 	resources = await discoverInstalledResourcesCached(tmp);
 	assert.deepEqual(resources.skillPaths, [], "disabled source omits every managed skill under the source and dominates same-scope path enables");
+	const inventoryPi = { getCommands: () => [] };
+	const statusSkills = await buildSkillList(inventoryPi, [], [alpha, beta], state.skillPolicy, tmp, [sourceRoot]);
+	const statusSources = buildSourceList(statusSkills, [sourceRoot], state.skillPolicy, tmp);
+	const statusText = formatManageSkillsStatus(statusSkills, statusSources);
+	assert.match(statusText, /Disabled sources:/, "non-TUI status includes disabled source section");
+	assert.match(statusText, /global\/source/, "disabled source status shows source policy target");
+	assert.ok(!statusText.includes("undefined"), "disabled source status never renders undefined policy target");
 
 	let policy = defaultSkillPolicy();
 	setGlobalSkillPolicy(policy, { name: "alpha", path: alpha, sourceRoot }, "disabled");

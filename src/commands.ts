@@ -302,7 +302,7 @@ Disabled skills are removed from the model prompt and explicit /skill:<name> inv
 Non-TUI mode intentionally shows compact status/help instead of printing a full manager.`;
 }
 
-function formatManageSkillsStatus(skills: SkillInfo[], sources: SkillSourceInfo[]): string {
+export function formatManageSkillsStatus(skills: SkillInfo[], sources: SkillSourceInfo[]): string {
 	const enabledSkills = skills.filter((skill) => skill.enabled).length;
 	const disabledSkills = skills.filter((skill) => !skill.enabled);
 	const disabledSources = sources.filter((source) => !source.enabled);
