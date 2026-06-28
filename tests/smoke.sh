@@ -4,13 +4,21 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 CREATED_NODE_MODULES_DIR=""
-CREATED_MARIOZECHNER_LINK=""
+CREATED_EARENDIL_WORKS_LINK=""
 cleanup() {
   rm -rf "$TMP"
-  if [[ -n "$CREATED_MARIOZECHNER_LINK" ]]; then rm -f "$ROOT/node_modules/@mariozechner"; fi
+  if [[ -n "$CREATED_EARENDIL_WORKS_LINK" ]]; then rm -f "$ROOT/node_modules/@earendil-works"; fi
   if [[ -n "$CREATED_NODE_MODULES_DIR" ]]; then rm -rf "$ROOT/node_modules"; fi
 }
 trap cleanup EXIT
+
+FORBIDDEN_PI_SCOPE="@mario""zechner"
+FORBIDDEN_PI_MATCHES="$(rg -n --fixed-strings "$FORBIDDEN_PI_SCOPE" "$ROOT/package.json" "$ROOT/src" "$ROOT/tests" "$ROOT/index.ts" || true)"
+if [[ -n "$FORBIDDEN_PI_MATCHES" ]]; then
+  echo "$FORBIDDEN_PI_MATCHES" >&2
+  echo "Forbidden legacy Pi package scope references found." >&2
+  exit 1
+fi
 
 AGENT="$TMP/agent"
 MARKETPLACE="$TMP/marketplace"
@@ -153,43 +161,47 @@ NODE
 
 NPM_GLOBAL_ROOT="$(npm root -g)"
 PI_NODE_ROOTS=("$NPM_GLOBAL_ROOT" "$HOME/.local/lib/node_modules")
+PI_SCOPE_ROOT=""
 PI_PACKAGE_ROOT=""
+PI_TUI_ROOT=""
 JITI_REGISTER=""
 for PI_NODE_ROOT in "${PI_NODE_ROOTS[@]}"; do
-  MARIOZECHNER_ROOT="$PI_NODE_ROOT/@mariozechner"
-  if [[ -d "$MARIOZECHNER_ROOT/pi-coding-agent" ]]; then
-    PI_PACKAGE_ROOT="$MARIOZECHNER_ROOT/pi-coding-agent"
-    JITI_REGISTER="$PI_PACKAGE_ROOT/node_modules/@mariozechner/jiti/lib/jiti-register.mjs"
-    if [[ ! -f "$JITI_REGISTER" ]]; then
-      JITI_REGISTER="$PI_PACKAGE_ROOT/node_modules/jiti/lib/jiti-register.mjs"
-    fi
-    break
-  elif [[ -d "$PI_NODE_ROOT/@earendil-works/pi-coding-agent" ]]; then
-    PI_PACKAGE_ROOT="$PI_NODE_ROOT/@earendil-works/pi-coding-agent"
+  EARENDIL_WORKS_ROOT="$PI_NODE_ROOT/@earendil-works"
+  if [[ -d "$EARENDIL_WORKS_ROOT/pi-coding-agent" ]]; then
+    PI_SCOPE_ROOT="$EARENDIL_WORKS_ROOT"
+    PI_PACKAGE_ROOT="$EARENDIL_WORKS_ROOT/pi-coding-agent"
     JITI_REGISTER="$PI_PACKAGE_ROOT/node_modules/jiti/lib/jiti-register.mjs"
     break
   fi
 done
 if [[ -z "$PI_PACKAGE_ROOT" || ! -f "$JITI_REGISTER" ]]; then
-  echo "Could not resolve Pi's package or jiti register from roots: ${PI_NODE_ROOTS[*]}" >&2
+  echo "Could not resolve Pi's @earendil-works package or jiti register from roots: ${PI_NODE_ROOTS[*]}" >&2
+  exit 1
+fi
+for candidate in "$PI_SCOPE_ROOT/pi-tui" "$PI_PACKAGE_ROOT/node_modules/@earendil-works/pi-tui"; do
+  if [[ -d "$candidate" ]]; then
+    PI_TUI_ROOT="$candidate"
+    break
+  fi
+done
+if [[ -z "$PI_TUI_ROOT" ]]; then
+  echo "Could not resolve @earendil-works/pi-tui from Pi package root: $PI_PACKAGE_ROOT" >&2
   exit 1
 fi
 if [[ ! -e "$ROOT/node_modules" ]]; then
   mkdir "$ROOT/node_modules"
   CREATED_NODE_MODULES_DIR=1
 fi
-if [[ ! -e "$ROOT/node_modules/@mariozechner" ]]; then
-  if [[ -d "$MARIOZECHNER_ROOT" && -d "$MARIOZECHNER_ROOT/pi-coding-agent" ]]; then
-    ln -s "$MARIOZECHNER_ROOT" "$ROOT/node_modules/@mariozechner"
+if [[ ! -e "$ROOT/node_modules/@earendil-works" ]]; then
+  if [[ -d "$PI_SCOPE_ROOT/pi-tui" ]]; then
+    ln -s "$PI_SCOPE_ROOT" "$ROOT/node_modules/@earendil-works"
   else
-    mkdir -p "$TMP/mariozechner"
-    ln -s "$PI_PACKAGE_ROOT" "$TMP/mariozechner/pi-coding-agent"
-    if [[ -d "$PI_PACKAGE_ROOT/node_modules/@earendil-works/pi-tui" ]]; then
-      ln -s "$PI_PACKAGE_ROOT/node_modules/@earendil-works/pi-tui" "$TMP/mariozechner/pi-tui"
-    fi
-    ln -s "$TMP/mariozechner" "$ROOT/node_modules/@mariozechner"
+    mkdir -p "$TMP/earendil-works"
+    ln -s "$PI_PACKAGE_ROOT" "$TMP/earendil-works/pi-coding-agent"
+    ln -s "$PI_TUI_ROOT" "$TMP/earendil-works/pi-tui"
+    ln -s "$TMP/earendil-works" "$ROOT/node_modules/@earendil-works"
   fi
-  CREATED_MARIOZECHNER_LINK=1
+  CREATED_EARENDIL_WORKS_LINK=1
 fi
 JITI_FS_CACHE="$TMP/jiti-cache" PI_CODING_AGENT_DIR="$AGENT" node --import "$JITI_REGISTER" "$ROOT/tests/mock-ui-browse.mjs" | grep -q "mock ui browse ok"
 JITI_FS_CACHE="$TMP/jiti-cache" PI_CODING_AGENT_DIR="$AGENT" node --import "$JITI_REGISTER" "$ROOT/tests/autocomplete-smoke.mjs" | grep -q "autocomplete smoke ok"

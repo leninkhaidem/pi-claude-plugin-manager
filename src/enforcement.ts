@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { evaluateSkillPolicy } from "./skill-policy.js";
 import type { SkillPolicy } from "./types.js";
 import { normalizePath } from "./utils.js";

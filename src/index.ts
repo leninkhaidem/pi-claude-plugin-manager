@@ -1,5 +1,5 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Text } from "@mariozechner/pi-tui";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { syncAgentSymlinks } from "./agents.js";
 import { getManageSkillsArgumentCompletions, getPluginArgumentCompletions } from "./autocomplete.js";
 import { CUSTOM_MESSAGE_TYPE } from "./constants.js";

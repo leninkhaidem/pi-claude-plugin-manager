@@ -1,4 +1,4 @@
-import { matchesKey, Key, truncateToWidth } from "@mariozechner/pi-tui";
+import { matchesKey, Key, truncateToWidth } from "@earendil-works/pi-tui";
 
 export type CheckboxItem = {
 	label: string;
