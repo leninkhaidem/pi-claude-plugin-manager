@@ -329,7 +329,7 @@ Local marketplace while developing:
 - Claude plugin skills as Pi skills.
 - Claude plugin command markdown as Pi prompt templates.
 - Skill management across all sources (Pi-native, plugin, custom).
-- Skill and source toggling with interactive checkbox UI.
+- Skill and source management with the interactive `/manage-skills` TUI.
 - Auto-update checks with configurable TTL and notification modes.
 - Interactive config editor in TUI.
 - Optional read-only import from Claude Code's existing install state.
