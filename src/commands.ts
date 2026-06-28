@@ -1,5 +1,5 @@
 import { syncAgentSymlinks } from "./agents.js";
-import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { clearAutocompleteCache, PLUGIN_BROWSE_SELECT_LIMIT } from "./autocomplete.js";
 import { CONFIG_FIELDS, isConfigKey } from "./config-metadata.js";
 import { clearDiscoveryCache, discoverInstalledResourcesCached } from "./discovery.js";

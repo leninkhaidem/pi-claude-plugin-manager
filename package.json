@@ -13,8 +13,8 @@
     "smoke": "./tests/smoke.sh"
   },
   "peerDependencies": {
-    "@mariozechner/pi-coding-agent": "*",
-    "@mariozechner/pi-tui": "*"
+    "@earendil-works/pi-coding-agent": ">=0.80.0",
+    "@earendil-works/pi-tui": ">=0.80.0"
   },
   "pi": {
     "extensions": [

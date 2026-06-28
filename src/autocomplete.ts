@@ -1,4 +1,4 @@
-import type { AutocompleteItem } from "@mariozechner/pi-tui";
+import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { PLUGIN_AUTOCOMPLETE_LIMIT, PLUGIN_BROWSE_SELECT_LIMIT } from "./constants.js";
 import { CONFIG_FIELDS, configFieldForKey } from "./config-metadata.js";
 import { listMarketplacePlugins } from "./marketplace.js";

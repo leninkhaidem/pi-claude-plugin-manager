@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { getAgentDir } from "@mariozechner/pi-coding-agent";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_CLAUDE_DIR, STATE_VERSION } from "./constants.js";
 import { exists, readJsonFile } from "./fs-utils.js";
 import { defaultSkillPolicy, disabledSkillPathRecordForCompatibility, disabledSourcePathRecordForCompatibility, normalizeSkillPolicy } from "./skill-policy.js";

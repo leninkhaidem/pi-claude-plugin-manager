@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { claudePluginEntriesForCwd } from "./discovery.js";
 import { collectResourcesFromPluginRoot, readPluginManifest } from "./resources.js";
 import { stateDir } from "./state.js";

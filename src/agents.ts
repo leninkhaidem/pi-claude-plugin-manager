@@ -1,4 +1,4 @@
-import { getAgentDir } from "@mariozechner/pi-coding-agent";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { lstat, mkdir, readdir, readFile, symlink, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AgentEntry } from "./resources.js";
