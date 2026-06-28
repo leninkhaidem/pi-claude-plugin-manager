@@ -546,15 +546,22 @@ export class ManageSkillsTui implements Component {
 	}
 
 	private renderFooter(width: number): string[] {
+		const shortcuts = this.editingSearch ? [
+			{ key: "Type", label: "filter all skills" },
+			{ key: "Backspace", label: "delete" },
+			{ key: "Ctrl-U", label: "clear" },
+			{ key: "Enter", label: "apply" },
+			{ key: "Esc", label: "close search" },
+		] : [
+			{ key: "Space", label: "toggle this folder" },
+			{ key: "Enter", label: "details" },
+			{ key: "/", label: "search" },
+			{ key: "a", label: "advanced" },
+			{ key: "r", label: "reset" },
+			{ key: "Esc", label: "close" },
+		];
 		return [
-			this.shortcutLegend(width, [
-				{ key: "Space", label: "toggle this folder" },
-				{ key: "Enter", label: "details" },
-				{ key: "/", label: "search" },
-				{ key: "a", label: "advanced" },
-				{ key: "r", label: "reset" },
-				{ key: "Esc", label: "close" },
-			]),
+			this.shortcutLegend(width, shortcuts),
 			this.statusLine(width),
 		];
 	}

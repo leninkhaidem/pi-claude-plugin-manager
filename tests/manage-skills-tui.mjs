@@ -142,7 +142,12 @@ try {
 	assert.match(dashboard, /23\/23 matching/, "plain typing before slash does not start or mutate search");
 	assert.doesNotMatch(dashboard, /Search all 23 skills: sp/, "plain typing is ignored until slash activates search");
 
-	setSearch(component, "special");
+	component.handleInput("/");
+	let searchMode = renderText(component, 110);
+	assert.match(searchMode, /Type filter all skills\s+• Backspace delete\s+• Ctrl-U clear\s+• Enter apply\s+• Esc close search/, "active search mode shows search-specific key hints");
+	assert.doesNotMatch(searchMode, /Space toggle this folder|Enter details|a advanced|r reset/, "search footer does not advertise dashboard mutation keys");
+	for (const ch of "special") component.handleInput(ch);
+	component.handleInput("\r");
 	dashboard = renderText(component, 110);
 	assert.match(dashboard, /special-skill/, "slash-activated global search finds an off-screen skill by name");
 	assert.match(dashboard, /1-1 of 1 matching skills/, "search result count is shown");
@@ -219,8 +224,12 @@ try {
 	});
 	const themedRaw = renderText(themedComponent, 120);
 	assert.match(themedRaw, /\x1b\[/, "themed shortcut legend uses ANSI styling through the theme callback");
-	const themedPlain = stripAnsi(themedRaw);
+	let themedPlain = stripAnsi(themedRaw);
 	assert.match(themedPlain, /Space toggle this folder\s+• Enter details\s+• \/ search\s+• a advanced\s+• r reset\s+• Esc close/, "stripped shortcut legend remains clear");
+	themedComponent.handleInput("/");
+	themedPlain = stripAnsi(renderText(themedComponent, 120));
+	assert.match(themedPlain, /Type filter all skills\s+• Backspace delete\s+• Ctrl-U clear\s+• Enter apply\s+• Esc close search/, "themed search footer switches to search-specific hints");
+	assert.doesNotMatch(themedPlain, /Space toggle this folder|Enter details|a advanced|r reset/, "themed search footer hides dashboard mutation hints");
 	assertWidthSafe(themedComponent, [50, 86, 120]);
 
 	setSearch(component, "empty");
