@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-28
+
 ### Added
 
 - Added `/manage-skills`, an interactive TUI for browsing all discovered skills, searching the full inventory, viewing descriptions/details, and changing skill policy without leaving Pi.
