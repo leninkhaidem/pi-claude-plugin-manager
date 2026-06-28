@@ -1,3 +1,5 @@
 .claude/model-preferences.yml
 .worktrees/
 node_modules/
+.planning*
+.tasks/*

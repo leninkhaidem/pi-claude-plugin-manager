@@ -6,12 +6,13 @@ import { clearDiscoveryCache, discoverInstalledResourcesCached } from "./discove
 import { confirmInstall, emit, formatBrowseList, formatHelp, formatMarketplaceList, formatPluginList } from "./format.js";
 import { installPluginFromMarketplace, uninstallPlugin } from "./installer.js";
 import { addMarketplace, findMarketplacePlugin, listMarketplacePlugins, refreshMarketplace } from "./marketplace.js";
-import { buildSkillList, buildSourceList, discoverSkillsFromSources, formatSkillList, formatSkillsHelp, formatSourceList } from "./skills.js";
+import { buildSkillList, buildSourceList, discoverSkillsFromSources, type SkillInfo, type SkillSourceInfo } from "./skills.js";
 import { CheckboxSelector, type CheckboxItem, type CheckboxResult } from "./checkbox.js";
+import { createManageSkillsTui, type ManageSkillsTuiResult } from "./manage-skills-tui.js";
 import { formatUpdateCheckResults, runUpdateCheck } from "./update-check.js";
 import { defaultConfig, formatConfig, readConfig, readState, writeConfig, writeState } from "./state.js";
 import type { CommandResult, InstalledPluginEntry, MarketplacePluginListing, ManagerConfig, Scope, State } from "./types.js";
-import { hasFlag, normalizePath, parsePluginSpec, pluginKey, splitArgs, withoutFlags } from "./utils.js";
+import { hasFlag, parsePluginSpec, pluginKey, splitArgs, withoutFlags } from "./utils.js";
 import { rm } from "node:fs/promises";
 import { collectResourcesFromPluginRoot, readPluginManifest } from "./resources.js";
 import { claudePluginEntriesForCwd, installedEntriesForCwd, piManagedKeysForCwd } from "./discovery.js";
@@ -93,7 +94,7 @@ async function handleConfigCommand(pi: ExtensionAPI, args: string[], ctx: Extens
 			}
 			config[key] = normalized as "notify" | "prompt" | "off";
 		} else if (key === "skillSources") {
-			await emit(pi, ctx, "Use `/skills sources` to manage skill source directories.");
+			await emit(pi, ctx, "Use `/plugin config set skillSources <paths>` for source configuration, or `/manage-skills` for skill policy status.");
 			return {};
 		} else {
 			(config as Record<string, unknown>)[key] = rawValue;
@@ -151,7 +152,7 @@ async function handleInteractiveConfigEdit(pi: ExtensionAPI, ctx: ExtensionComma
 	if (!field) return {};
 
 	if (field.key === "skillSources") {
-		await emit(pi, ctx, "Use `/skills sources` to manage skill source directories.");
+		await emit(pi, ctx, "Use `/plugin config set skillSources <paths>` for source configuration, or `/manage-skills` for skill policy status.");
 		return {};
 	}
 
@@ -229,292 +230,108 @@ async function getPluginSkillPaths(cwd: string): Promise<string[]> {
 	return [...new Set(skillPaths)];
 }
 
-export async function handleSkillsCommand(pi: ExtensionAPI, rawArgs: string, ctx: ExtensionCommandContext): Promise<CommandResult> {
+export async function handleManageSkillsCommand(pi: ExtensionAPI, rawArgs: string, ctx: ExtensionCommandContext): Promise<CommandResult> {
 	const args = splitArgs(rawArgs);
 	const command = args[0] ?? "";
 
-	if (!command || command === "help" || command === "--help" || command === "-h") {
-		if (!command && ctx.hasUI) {
-			const choice = await ctx.ui.select("Skill manager", [
-				"List all managed skills",
-				"Toggle skills on/off",
-				"Manage skill sources",
-				"Show help",
-			]);
-			if (choice === "List all managed skills") return await handleSkillsCommand(pi, "list", ctx);
-			if (choice === "Toggle skills on/off") return await handleSkillsCommand(pi, "toggle", ctx);
-			if (choice === "Manage skill sources") return await handleSkillsCommand(pi, "sources", ctx);
-			if (choice === "Show help") {
-				await emit(pi, ctx, formatSkillsHelp());
-				return {};
-			}
-			return {};
-		}
-		await emit(pi, ctx, formatSkillsHelp());
+	if (command === "help" || command === "--help" || command === "-h") {
+		await emit(pi, ctx, formatManageSkillsHelp());
 		return {};
 	}
 
-	if (command === "list" || command === "ls") {
-		const state = await readState();
-		const config = await readConfig();
-		const pluginSkillPaths = await getPluginSkillPaths(ctx.cwd);
-		const customSkillPaths = await discoverSkillsFromSources(config.skillSources ?? []);
-		const skills = await buildSkillList(pi, pluginSkillPaths, customSkillPaths, state.disabledSkills, state.disabledSkillSources, ctx.cwd);
-		await emit(pi, ctx, formatSkillList(skills));
+	if (command === "status") {
+		const { skills, sources } = await loadManageSkillsInventory(pi, ctx.cwd);
+		await emit(pi, ctx, formatManageSkillsStatus(skills, sources));
 		return {};
 	}
 
-	if (command === "toggle") {
-		const state = await readState();
-		const config = await readConfig();
-		const pluginSkillPaths = await getPluginSkillPaths(ctx.cwd);
-		const customSkillPaths = await discoverSkillsFromSources(config.skillSources ?? []);
-		const skills = await buildSkillList(pi, pluginSkillPaths, customSkillPaths, state.disabledSkills, state.disabledSkillSources, ctx.cwd);
+	if (command === "") {
+		if (ctx.hasUI) return await runManageSkillsTui(pi, ctx);
+		const { skills, sources } = await loadManageSkillsInventory(pi, ctx.cwd);
+		await emit(pi, ctx, `${formatManageSkillsStatus(skills, sources)}\n\nInteractive editing requires Pi TUI mode. Run /manage-skills in an interactive terminal, or use /manage-skills help for details.`);
+		return {};
+	}
 
-		if (skills.length === 0) {
-			await emit(pi, ctx, "No managed skills found. Install plugins with skills or add skill source directories.");
-			return {};
-		}
+	await emit(pi, ctx, `Unsupported /manage-skills command: ${command}\n\n${formatManageSkillsHelp()}`);
+	return {};
+}
 
-		const skillName = args[1];
-		let target: typeof skills[0] | undefined;
+async function loadManageSkillsInventory(pi: ExtensionAPI, cwd: string): Promise<{ state: State; config: ManagerConfig; skills: SkillInfo[]; sources: SkillSourceInfo[] }> {
+	const state = await readState();
+	const config = await readConfig();
+	const pluginSkillPaths = await getPluginSkillPaths(cwd);
+	const customSkillPaths = await discoverSkillsFromSources(config.skillSources ?? []);
+	const skills = await buildSkillList(pi, pluginSkillPaths, customSkillPaths, state.skillPolicy, cwd, config.skillSources ?? []);
+	const sources = buildSourceList(skills, config.skillSources ?? [], state.skillPolicy, cwd);
+	return { state, config, skills, sources };
+}
 
-		if (skillName) {
-			// Find by name
-			const matches = skills.filter((s) => s.name === skillName);
-			if (matches.length === 0) {
-				throw new Error(`Skill not found: ${skillName}. Use /skills list to see available skills.`);
-			}
-			if (matches.length > 1) {
-				if (ctx.hasUI) {
-					const labels = matches.map((s) => `${s.enabled ? "\u2713" : "\u25CB"} ${s.name} (${s.sourceLabel}) \u2014 ${s.path}`);
-					const selected = await ctx.ui.select("Multiple skills with that name. Which one?", labels);
-					if (!selected) return {};
-					target = matches[labels.indexOf(selected)];
-				} else {
-					throw new Error(`Ambiguous skill name: ${skillName}. Matching paths:\n${matches.map((s) => `  ${s.path}`).join("\n")}`);
-				}
-			} else {
-				target = matches[0];
-			}
-		} else if (ctx.hasUI) {
-			// Interactive checkbox toggle
-			const checkboxItems: CheckboxItem[] = skills.map((s) => ({
-				label: `${s.name} (${s.sourceLabel})${s.description ? " \u2014 " + s.description : ""}`,
-				checked: s.enabled,
-				key: s.path,
-			}));
-			const result = await runCheckboxSelector(ctx, "Toggle skills (space=toggle, enter=apply, esc=cancel)", checkboxItems);
-			if (!result || !result.applied) return {};
-
-			// Apply changes
-			let changeCount = 0;
-			for (let i = 0; i < skills.length; i++) {
-				const skill = skills[i]!;
-				const newChecked = result.items[i]!.checked;
-				if (newChecked !== skill.enabled) {
-					changeCount++;
-					if (newChecked) {
-						delete state.disabledSkills[skill.path];
-					} else {
-						state.disabledSkills[skill.path] = true;
-					}
-				}
-			}
-			if (changeCount === 0) {
-				await emit(pi, ctx, "No changes made.");
-				return {};
-			}
-			await writeState(state);
-			clearRuntimeCaches();
-			await emit(pi, ctx, `Toggled ${changeCount} skill${changeCount === 1 ? "" : "s"}. Run /reload or /plugin reload for changes to take effect.`);
-			return { reloadRecommended: true };
-		} else {
-			throw new Error("Usage: /skills toggle <skill-name>");
-		}
-
-		if (!target) return {};
-
-		// Toggle
-		const newEnabled = !target.enabled;
-		if (newEnabled) {
-			delete state.disabledSkills[target.path];
-		} else {
-			state.disabledSkills[target.path] = true;
-		}
-		await writeState(state);
-		clearRuntimeCaches();
-		await emit(pi, ctx, `${newEnabled ? "Enabled" : "Disabled"} skill: ${target.name}\npath: ${target.path}\n\nRun /reload or /plugin reload for the change to take effect.`);
+async function runManageSkillsTui(pi: ExtensionAPI, ctx: ExtensionCommandContext): Promise<CommandResult> {
+	const { state, skills, sources } = await loadManageSkillsInventory(pi, ctx.cwd);
+	const result = await ctx.ui.custom<ManageSkillsTuiResult>((tui, theme, _keybindings, done) => createManageSkillsTui({
+		cwd: ctx.cwd,
+		skills,
+		sources,
+		state,
+		saveState: writeState,
+		done,
+		tui,
+		theme,
+		onSaved: clearRuntimeCaches,
+	}), {
+		overlay: true,
+		overlayOptions: { anchor: "center", width: "90%", minWidth: 50, maxHeight: "90%" },
+	});
+	if (result?.changed) {
+		await emit(pi, ctx, "Skill policy updated. Disabled skills are prompt-filtered and /skill blocked immediately; run /reload to refresh manager-owned discovered skills.");
 		return { reloadRecommended: true };
 	}
+	return {};
+}
 
-	if (command === "sources") {
-		const sub = args[1] ?? "";
-		const config = await readConfig();
-		const customSources = config.skillSources ?? [];
+function formatManageSkillsHelp(): string {
+	return `# /manage-skills — Skill manager
 
-		if (!sub) {
-			if (ctx.hasUI) {
-				const choice = await ctx.ui.select("Skill sources", [
-					"List all sources with status",
-					"Toggle a source on/off",
-					"Add a custom source directory",
-					"Remove a custom source directory",
-				]);
-				if (!choice) return {};
-				if (choice === "List all sources with status") return await handleSkillsCommand(pi, "sources list", ctx);
-				if (choice === "Toggle a source on/off") return await handleSkillsCommand(pi, "sources toggle", ctx);
-				if (choice === "Add a custom source directory") return await handleSkillsCommand(pi, "sources add", ctx);
-				if (choice === "Remove a custom source directory") return await handleSkillsCommand(pi, "sources remove", ctx);
-				return {};
-			}
-			// Non-interactive: show all sources
-			return await handleSkillsCommand(pi, "sources list", ctx);
+/manage-skills            # Open the interactive skill manager in Pi TUI mode
+/manage-skills status     # Compact skill policy status
+/manage-skills help       # Show this help
+
+The interactive manager shows a searchable per-skill table with Current/Rule status. Space toggles the selected skill for this folder, Enter opens read-only details, and advanced policy controls live behind the 'a' screen.
+
+Disabled skills are removed from the model prompt and explicit /skill:<name> invocations are blocked before skill expansion. Manager-owned disabled skills and sources are omitted from resource discovery after /reload; re-enabled resources reappear after /reload.
+
+Non-TUI mode intentionally shows compact status/help instead of printing a full manager.`;
+}
+
+export function formatManageSkillsStatus(skills: SkillInfo[], sources: SkillSourceInfo[]): string {
+	const enabledSkills = skills.filter((skill) => skill.enabled).length;
+	const disabledSkills = skills.filter((skill) => !skill.enabled);
+	const disabledSources = sources.filter((source) => !source.enabled);
+	const lines = ["# Skill policy status", ""];
+	lines.push(`Skills: ${skills.length} total, ${enabledSkills} enabled, ${disabledSkills.length} disabled.`);
+	lines.push(`Sources: ${sources.length} total, ${disabledSources.length} disabled.`);
+	lines.push("");
+	if (disabledSkills.length > 0) {
+		lines.push("Disabled skills:");
+		for (const skill of disabledSkills.slice(0, 10)) {
+			lines.push(`- ${skill.name} (${skill.sourceLabel}) — ${skill.effectiveState} by ${skill.winningScope}/${skill.winningTarget}`);
 		}
-
-		if (sub === "list" || sub === "ls") {
-			const state = await readState();
-			const pluginSkillPaths = await getPluginSkillPaths(ctx.cwd);
-			const customSkillPaths = await discoverSkillsFromSources(customSources);
-			const skills = await buildSkillList(pi, pluginSkillPaths, customSkillPaths, state.disabledSkills, state.disabledSkillSources, ctx.cwd);
-			const sourceList = buildSourceList(skills, customSources, state.disabledSkillSources, ctx.cwd);
-			await emit(pi, ctx, formatSourceList(sourceList));
-			return {};
-		}
-
-		if (sub === "toggle") {
-			const state = await readState();
-			const pluginSkillPaths = await getPluginSkillPaths(ctx.cwd);
-			const customSkillPaths = await discoverSkillsFromSources(customSources);
-			const skills = await buildSkillList(pi, pluginSkillPaths, customSkillPaths, state.disabledSkills, state.disabledSkillSources, ctx.cwd);
-			const sourceList = buildSourceList(skills, customSources, state.disabledSkillSources, ctx.cwd);
-
-			if (sourceList.length === 0) {
-				await emit(pi, ctx, "No skill sources found.");
-				return {};
-			}
-
-			const targetPath = args[2];
-			let target: typeof sourceList[0] | undefined;
-
-			if (targetPath) {
-				const normalized = normalizePath(targetPath);
-				target = sourceList.find((s) => s.path === normalized);
-				if (!target) {
-					throw new Error(`Source not found: ${normalized}. Use /skills sources list to see available sources.`);
-				}
-			} else if (ctx.hasUI) {
-				const checkboxItems: CheckboxItem[] = sourceList.map((s) => ({
-					label: `${s.label} (${s.skillCount} skill${s.skillCount === 1 ? "" : "s"})`,
-					checked: s.enabled,
-					key: s.path,
-				}));
-				const result = await runCheckboxSelector(ctx, "Toggle sources (space=toggle, enter=apply, esc=cancel)", checkboxItems);
-				if (!result || !result.applied) return {};
-
-				let changeCount = 0;
-				for (let i = 0; i < sourceList.length; i++) {
-					const source = sourceList[i]!;
-					const newChecked = result.items[i]!.checked;
-					if (newChecked !== source.enabled) {
-						changeCount++;
-						if (newChecked) {
-							delete state.disabledSkillSources[source.path];
-						} else {
-							state.disabledSkillSources[source.path] = true;
-						}
-					}
-				}
-				if (changeCount === 0) {
-					await emit(pi, ctx, "No changes made.");
-					return {};
-				}
-				await writeState(state);
-				clearRuntimeCaches();
-				await emit(pi, ctx, `Toggled ${changeCount} source${changeCount === 1 ? "" : "s"}. Run /reload or /plugin reload for changes to take effect.`);
-				return { reloadRecommended: true };
-			} else {
-				throw new Error("Usage: /skills sources toggle <source-path>");
-			}
-
-			if (!target) return {};
-
-			const newEnabled = !target.enabled;
-			if (newEnabled) {
-				delete state.disabledSkillSources[target.path];
-			} else {
-				state.disabledSkillSources[target.path] = true;
-			}
-			await writeState(state);
-			clearRuntimeCaches();
-			await emit(pi, ctx, `${newEnabled ? "Enabled" : "Disabled"} source: ${target.path} (${target.skillCount} skill${target.skillCount === 1 ? "" : "s"})\n\nRun /reload or /plugin reload for the change to take effect.`);
-			return { reloadRecommended: true };
-		}
-
-		if (sub === "add") {
-			const newPath = args[2];
-			if (!newPath) {
-				if (ctx.hasUI) {
-					const inputPath = await ctx.ui.input("Directory path", "/path/to/skills");
-					if (!inputPath) return {};
-					const normalized = normalizePath(inputPath);
-					if (customSources.includes(normalized)) {
-						await emit(pi, ctx, `Skill source already exists: ${normalized}`);
-						return {};
-					}
-					config.skillSources = [...customSources, normalized];
-					await writeConfig(config);
-					clearRuntimeCaches();
-					await emit(pi, ctx, `Added skill source: ${normalized}\n\nRun /reload or /plugin reload to discover skills from this directory.`);
-					return { reloadRecommended: true };
-				}
-				throw new Error("Usage: /skills sources add <path>");
-			}
-			const normalized = normalizePath(newPath);
-			if (customSources.includes(normalized)) {
-				await emit(pi, ctx, `Skill source already exists: ${normalized}`);
-				return {};
-			}
-			config.skillSources = [...customSources, normalized];
-			await writeConfig(config);
-			clearRuntimeCaches();
-			await emit(pi, ctx, `Added skill source: ${normalized}\n\nRun /reload or /plugin reload to discover skills from this directory.`);
-			return { reloadRecommended: true };
-		}
-
-		if (sub === "remove" || sub === "rm") {
-			const targetPath = args[2];
-			if (!targetPath && ctx.hasUI) {
-				const removable = customSources;
-				if (removable.length === 0) {
-					await emit(pi, ctx, "No custom skill sources to remove. (Pi built-in sources cannot be removed, but you can toggle them off with `/skills sources toggle`.)");
-					return {};
-				}
-				const toRemove = await ctx.ui.select("Remove which custom source?", removable);
-				if (!toRemove) return {};
-				config.skillSources = customSources.filter((s) => s !== toRemove);
-				await writeConfig(config);
-				clearRuntimeCaches();
-				await emit(pi, ctx, `Removed skill source: ${toRemove}\n\nRun /reload or /plugin reload for the change to take effect.`);
-				return { reloadRecommended: true };
-			}
-			if (!targetPath) throw new Error("Usage: /skills sources remove <path>");
-			const normalized = normalizePath(targetPath);
-			if (!customSources.includes(normalized)) {
-				await emit(pi, ctx, `Custom skill source not found: ${normalized}`);
-				return {};
-			}
-			config.skillSources = customSources.filter((s) => s !== normalized);
-			await writeConfig(config);
-			clearRuntimeCaches();
-			await emit(pi, ctx, `Removed skill source: ${normalized}\n\nRun /reload or /plugin reload for the change to take effect.`);
-			return { reloadRecommended: true };
-		}
-
-		throw new Error(`Unknown sources command: ${sub}. Use /skills sources list, /skills sources toggle, /skills sources add, or /skills sources remove.`);
+		if (disabledSkills.length > 10) lines.push(`- …and ${disabledSkills.length - 10} more`);
+	} else {
+		lines.push("Disabled skills: none");
 	}
-
-	throw new Error(`Unknown /skills command: ${command}. Use /skills help.`);
+	lines.push("");
+	if (disabledSources.length > 0) {
+		lines.push("Disabled sources:");
+		for (const source of disabledSources.slice(0, 10)) {
+			lines.push(`- ${source.label} (${source.skillCount} skill${source.skillCount === 1 ? "" : "s"}) — ${source.effectiveState} by ${source.winningScope}/${source.winningTarget}`);
+		}
+		if (disabledSources.length > 10) lines.push(`- …and ${disabledSources.length - 10} more`);
+	} else {
+		lines.push("Disabled sources: none");
+	}
+	lines.push("", "Run /reload after policy changes to refresh manager-owned discovered resources.", "Use /manage-skills help for command help.");
+	return lines.join("\n");
 }
 
 function searchablePluginText(plugin: MarketplacePluginListing): string {

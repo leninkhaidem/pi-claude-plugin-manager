@@ -6,6 +6,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Added `/manage-skills`, an interactive TUI for browsing all discovered skills, searching the full inventory, viewing descriptions/details, and changing skill policy without leaving Pi.
+- Added manager-owned skill policy storage with global defaults plus started-folder overrides for individual skills and whole skill sources.
+
+### Changed
+
+- Replaced the legacy `/skills` command with `/manage-skills`; disabled skills are removed from model prompt context and explicit `/skill:<name>` invocations are blocked before skill expansion.
+- Updated skill-manager controls to use clearer `Current`/`Rule` labels, direct `Space` toggles, `r` reset, read-only `Enter` details, advanced policy actions behind `a`, and mode-specific colored shortcut hints.
+
+### Fixed
+
+- Fixed folded YAML skill descriptions such as `description: >` so skill details and search use the full description instead of the block marker.
+- Fixed manage-skills TUI focus, height, and active-search footer behavior so the overlay closes cleanly, shows more skills, and displays accurate key hints while searching.
+
 ### Planned
 
 - Claude plugin hooks are not executed yet.

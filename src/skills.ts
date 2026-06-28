@@ -3,6 +3,8 @@ import { readFile, realpath } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { exists, readDirectories, readEntries } from "./fs-utils.js";
+import { evaluateSkillPolicy, evaluateSourcePolicy, type SkillPolicyEffectiveState } from "./skill-policy.js";
+import type { FolderSkillPolicyValue, SkillPolicy, SkillPolicyValue } from "./types.js";
 import { normalizePath } from "./utils.js";
 
 export type SkillInfo = {
@@ -13,6 +15,15 @@ export type SkillInfo = {
 	sourceLabel: string;
 	sourceRoot: string;
 	enabled: boolean;
+	globalState: SkillPolicyValue;
+	folderState: FolderSkillPolicyValue;
+	effectiveState: SkillPolicyValue;
+	winningScope: "global" | "folder";
+	winningTarget: SkillPolicyEffectiveState["winningTarget"];
+	identityKind: "path" | "name";
+	identityKey: string;
+	duplicateName: boolean;
+	sameNameCount: number;
 };
 
 export type SkillSourceInfo = {
@@ -21,21 +32,69 @@ export type SkillSourceInfo = {
 	kind: "pi-path" | "pi-package" | "plugin-marketplace" | "custom-source";
 	skillCount: number;
 	enabled: boolean;
+	globalState: SkillPolicyValue;
+	folderState: FolderSkillPolicyValue;
+	effectiveState: SkillPolicyValue;
+	winningScope: "global" | "folder";
+	winningTarget: SkillPolicyEffectiveState["winningTarget"];
 };
 
 function parseFrontmatter(content: string): Record<string, string> {
 	const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
 	if (!match?.[1]) return {};
 	const result: Record<string, string> = {};
-	for (const line of match[1].split(/\r?\n/)) {
+	const lines = match[1].split(/\r?\n/);
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i]!;
 		const colon = line.indexOf(":");
-		if (colon > 0) {
-			const key = line.slice(0, colon).trim();
-			const value = line.slice(colon + 1).trim();
-			result[key] = value;
+		if (colon <= 0 || /^\s/.test(line)) continue;
+		const key = line.slice(0, colon).trim();
+		const value = line.slice(colon + 1).trim();
+		if (/^[>|][+-]?$/.test(value)) {
+			const blockLines: string[] = [];
+			for (i = i + 1; i < lines.length; i++) {
+				const blockLine = lines[i]!;
+				if (blockLine.trim() !== "" && !/^\s/.test(blockLine)) {
+					i--;
+					break;
+				}
+				blockLines.push(blockLine);
+			}
+			result[key] = value.startsWith("|") ? literalBlock(blockLines).trim() : foldedBlock(blockLines).trim();
+			continue;
 		}
+		result[key] = value;
 	}
 	return result;
+}
+
+function literalBlock(lines: string[]): string {
+	return stripCommonIndent(lines).join("\n");
+}
+
+function foldedBlock(lines: string[]): string {
+	const stripped = stripCommonIndent(lines);
+	const paragraphs: string[] = [];
+	let current: string[] = [];
+	for (const line of stripped) {
+		if (line.trim() === "") {
+			if (current.length > 0) {
+				paragraphs.push(current.join(" ").trim());
+				current = [];
+			}
+			if (paragraphs.at(-1) !== "") paragraphs.push("");
+		} else {
+			current.push(line.trim());
+		}
+	}
+	if (current.length > 0) paragraphs.push(current.join(" ").trim());
+	return paragraphs.join("\n");
+}
+
+function stripCommonIndent(lines: string[]): string[] {
+	const indents = lines.filter((line) => line.trim() !== "").map((line) => line.match(/^\s*/)?.[0].length ?? 0);
+	const indent = indents.length > 0 ? Math.min(...indents) : 0;
+	return lines.map((line) => line.slice(Math.min(indent, line.length)));
 }
 
 export async function readSkillInfo(skillPath: string): Promise<{ name: string; description: string } | undefined> {
@@ -137,123 +196,133 @@ function deriveMarketplaceRoot(skillPath: string): string | undefined {
 	return match?.[1];
 }
 
-function isSourceDisabled(sourceRoot: string, disabledSkillSources: Record<string, boolean>): boolean {
-	return disabledSkillSources[sourceRoot] === true;
+export function sourceRootForSkillPath(skillPath: string, options: { cwd?: string; customSourceRoots?: string[] } = {}): { sourceRoot: string; sourceLabel: string; source: SkillInfo["source"] } {
+	const normalizedSkillPath = normalizePath(skillPath);
+	const customSourceRoots = (options.customSourceRoots ?? []).map(normalizePath).sort((a, b) => b.length - a.length);
+	for (const customRoot of customSourceRoots) {
+		if (normalizedSkillPath === customRoot || normalizedSkillPath.startsWith(`${customRoot}/`)) {
+			return { sourceRoot: customRoot, sourceLabel: shortenHomePath(customRoot), source: "custom-source" };
+		}
+	}
+
+	const marketplaceName = deriveMarketplaceName(normalizedSkillPath);
+	const marketplaceRoot = deriveMarketplaceRoot(normalizedSkillPath);
+	if (marketplaceRoot) {
+		return {
+			sourceRoot: marketplaceRoot,
+			sourceLabel: marketplaceName ? `marketplace: ${marketplaceName}` : shortenHomePath(marketplaceRoot),
+			source: "plugin",
+		};
+	}
+
+	const knownRoot = findKnownRoot(normalizedSkillPath, getPiKnownRoots(options.cwd || process.cwd()));
+	if (knownRoot) return { sourceRoot: knownRoot, sourceLabel: shortenHomePath(knownRoot), source: "pi-native" };
+
+	const packageRoot = getPackageRoot(normalizedSkillPath);
+	const packageName = detectPackageName(normalizedSkillPath);
+	if (packageRoot && packageName) return { sourceRoot: packageRoot, sourceLabel: `package: ${packageName}`, source: "pi-native" };
+
+	const fallbackRoot = path.dirname(normalizedSkillPath);
+	return { sourceRoot: fallbackRoot, sourceLabel: shortenHomePath(fallbackRoot), source: "pi-native" };
 }
 
-function isSkillEffectivelyDisabled(
-	skillPath: string,
-	sourceRoot: string,
-	disabledSkills: Record<string, boolean>,
-	disabledSkillSources: Record<string, boolean>,
-): boolean {
-	if (disabledSkills[skillPath] === true) return true;
-	if (isSourceDisabled(sourceRoot, disabledSkillSources)) return true;
-	return false;
+function skillInfoFromPolicy(base: Omit<SkillInfo, "enabled" | "globalState" | "folderState" | "effectiveState" | "winningScope" | "winningTarget" | "identityKind" | "identityKey" | "duplicateName" | "sameNameCount">, policy: SkillPolicy, cwd?: string): SkillInfo {
+	const effective = evaluateSkillPolicy(policy, { name: base.name, path: base.path, sourceRoot: base.sourceRoot }, cwd);
+	return {
+		...base,
+		enabled: effective.enabled,
+		globalState: effective.globalState,
+		folderState: effective.folderState,
+		effectiveState: effective.effectiveState,
+		winningScope: effective.winningScope,
+		winningTarget: effective.winningTarget,
+		identityKind: effective.identity.kind,
+		identityKey: effective.identity.key,
+		duplicateName: false,
+		sameNameCount: 1,
+	};
 }
 
 export async function buildSkillList(
 	pi: ExtensionAPI,
 	pluginSkillPaths: string[],
 	customSourceSkillPaths: string[],
-	disabledSkills: Record<string, boolean>,
-	disabledSkillSources: Record<string, boolean>,
+	policy: SkillPolicy,
 	cwd?: string,
+	customSourceRoots: string[] = [],
 ): Promise<SkillInfo[]> {
 	const skills: SkillInfo[] = [];
 	const seen = new Set<string>();
-	const knownRoots = getPiKnownRoots(cwd || process.cwd());
-
 	// Gather all Pi-native skills from pi.getCommands()
 	const commands = pi.getCommands();
 	const piNativeSkills = commands.filter((cmd) => cmd.source === "skill");
-	const extensionPaths = new Set([...pluginSkillPaths, ...customSourceSkillPaths]);
+	const extensionPaths = new Set([...pluginSkillPaths, ...customSourceSkillPaths].map(normalizePath));
 
 	// Add Pi-native skills (ones NOT contributed by our extension)
 	for (const cmd of piNativeSkills) {
-		const skillPath = cmd.sourceInfo.path;
+		const skillPath = normalizePath(cmd.sourceInfo.path);
 		if (extensionPaths.has(skillPath)) continue;
 		if (seen.has(skillPath)) continue;
 		seen.add(skillPath);
 
-		// Determine the source root
-		const knownRoot = findKnownRoot(skillPath, knownRoots);
-		const packageRoot = getPackageRoot(skillPath);
-		const packageName = detectPackageName(skillPath);
+		const sourceInfo = sourceRootForSkillPath(skillPath, { cwd, customSourceRoots });
+		const sourceRoot = sourceInfo.sourceRoot;
+		const sourceLabel = sourceInfo.sourceLabel;
 
-		let sourceRoot: string;
-		let sourceLabel: string;
-
-		if (knownRoot) {
-			sourceRoot = knownRoot;
-			sourceLabel = shortenHomePath(knownRoot);
-		} else if (packageRoot && packageName) {
-			sourceRoot = packageRoot;
-			sourceLabel = `package: ${packageName}`;
-		} else {
-			sourceRoot = cmd.sourceInfo.baseDir || path.dirname(skillPath);
-			sourceLabel = shortenHomePath(sourceRoot);
-		}
-
-		skills.push({
+		skills.push(skillInfoFromPolicy({
 			name: cmd.name.replace(/^skill:/, ""),
 			description: cmd.description || "",
 			path: skillPath,
 			source: "pi-native",
 			sourceLabel,
 			sourceRoot,
-			enabled: !isSkillEffectivelyDisabled(skillPath, sourceRoot, disabledSkills, disabledSkillSources),
-		});
+		}, policy, cwd));
 	}
 
 	// Add plugin skills — group by marketplace
 	for (const skillPath of pluginSkillPaths) {
-		if (seen.has(skillPath)) continue;
-		seen.add(skillPath);
-		const info = await readSkillInfo(skillPath);
-		const marketplaceName = deriveMarketplaceName(skillPath);
-		const marketplaceRoot = deriveMarketplaceRoot(skillPath);
-		const sourceRoot = marketplaceRoot || path.dirname(skillPath);
-		const sourceLabel = marketplaceName ? `marketplace: ${marketplaceName}` : shortenHomePath(sourceRoot);
+		const normalizedSkillPath = normalizePath(skillPath);
+		if (seen.has(normalizedSkillPath)) continue;
+		seen.add(normalizedSkillPath);
+		const info = await readSkillInfo(normalizedSkillPath);
+		const sourceInfo = sourceRootForSkillPath(normalizedSkillPath, { cwd, customSourceRoots });
 
-		skills.push({
-			name: info?.name || path.basename(path.dirname(skillPath)),
+		skills.push(skillInfoFromPolicy({
+			name: info?.name || path.basename(path.dirname(normalizedSkillPath)),
 			description: info?.description || "",
-			path: skillPath,
+			path: normalizedSkillPath,
 			source: "plugin",
-			sourceLabel,
-			sourceRoot,
-			enabled: !isSkillEffectivelyDisabled(skillPath, sourceRoot, disabledSkills, disabledSkillSources),
-		});
+			sourceLabel: sourceInfo.sourceLabel,
+			sourceRoot: sourceInfo.sourceRoot,
+		}, policy, cwd));
 	}
 
 	// Add custom source skills
 	for (const skillPath of customSourceSkillPaths) {
-		if (seen.has(skillPath)) continue;
-		seen.add(skillPath);
-		const info = await readSkillInfo(skillPath);
-		// Find which custom source directory this belongs to
-		let sourceRoot = path.dirname(skillPath);
-		for (const src of customSourceSkillPaths) {
-			const srcDir = normalizePath(src);
-			if (skillPath.startsWith(srcDir)) {
-				sourceRoot = srcDir;
-				break;
-			}
-		}
+		const normalizedSkillPath = normalizePath(skillPath);
+		if (seen.has(normalizedSkillPath)) continue;
+		seen.add(normalizedSkillPath);
+		const info = await readSkillInfo(normalizedSkillPath);
+		const sourceInfo = sourceRootForSkillPath(normalizedSkillPath, { cwd, customSourceRoots });
 
-		skills.push({
-			name: info?.name || path.basename(path.dirname(skillPath)),
+		skills.push(skillInfoFromPolicy({
+			name: info?.name || path.basename(path.dirname(normalizedSkillPath)),
 			description: info?.description || "",
-			path: skillPath,
+			path: normalizedSkillPath,
 			source: "custom-source",
-			sourceLabel: shortenHomePath(sourceRoot),
-			sourceRoot,
-			enabled: !isSkillEffectivelyDisabled(skillPath, sourceRoot, disabledSkills, disabledSkillSources),
-		});
+			sourceLabel: sourceInfo.sourceLabel,
+			sourceRoot: sourceInfo.sourceRoot,
+		}, policy, cwd));
 	}
 
-	return skills.sort((a, b) => a.name.localeCompare(b.name));
+	const nameCounts = new Map<string, number>();
+	for (const skill of skills) nameCounts.set(skill.name, (nameCounts.get(skill.name) ?? 0) + 1);
+	for (const skill of skills) {
+		skill.sameNameCount = nameCounts.get(skill.name) ?? 1;
+		skill.duplicateName = skill.sameNameCount > 1;
+	}
+
+	return skills.sort((a, b) => a.name.localeCompare(b.name) || a.sourceLabel.localeCompare(b.sourceLabel) || a.path.localeCompare(b.path));
 }
 
 function shortenHomePath(p: string): string {
@@ -266,7 +335,7 @@ function shortenHomePath(p: string): string {
 export function buildSourceList(
 	skills: SkillInfo[],
 	customSources: string[],
-	disabledSkillSources: Record<string, boolean>,
+	policy: SkillPolicy,
 	cwd?: string,
 ): SkillSourceInfo[] {
 	const sourceMap = new Map<string, { label: string; kind: SkillSourceInfo["kind"]; count: number }>();
@@ -304,12 +373,18 @@ export function buildSourceList(
 
 	const sources: SkillSourceInfo[] = [];
 	for (const [sourcePath, info] of sourceMap) {
+		const effective = evaluateSourcePolicy(policy, sourcePath, cwd);
 		sources.push({
 			path: sourcePath,
 			label: info.label,
 			kind: info.kind,
 			skillCount: info.count,
-			enabled: !isSourceDisabled(sourcePath, disabledSkillSources),
+			enabled: effective.enabled,
+			globalState: effective.globalState,
+			folderState: effective.folderState,
+			effectiveState: effective.effectiveState,
+			winningScope: effective.winningScope,
+			winningTarget: effective.winningTarget,
 		});
 	}
 
@@ -324,7 +399,7 @@ export function buildSourceList(
 
 export function formatSkillList(skills: SkillInfo[]): string {
 	if (skills.length === 0) {
-		return "No skills found. Install plugins with skills or add skill source directories with `/skills sources add <path>`.";
+		return "No skills found. Install plugins with skills or add skill source directories with `/plugin config set skillSources <paths>`.";
 	}
 
 	const lines = ["# All skills", ""];
@@ -389,27 +464,27 @@ export function formatSourceList(sources: SkillSourceInfo[]): string {
 	}
 
 	// Show note about available actions
-	lines.push("Use `/skills sources toggle` to enable/disable a source.");
-	lines.push("Use `/skills sources add <path>` to add a custom source.");
+	lines.push("Use `/manage-skills` to inspect source policy status.");
+	lines.push("Use `/plugin config set skillSources <paths>` to add a custom source.");
 
 	return lines.join("\n");
 }
 
 export function formatSkillsHelp(): string {
-	return `# /skills — Skill manager
+	return `# /manage-skills — Skill manager
 
 Manage skills from all sources: Pi-native, plugins, and custom directories.
 Toggle individual skills or entire source directories on/off.
 
 ## Commands
-/skills                              # Interactive menu (TUI) or list skills
-/skills list                         # List all skills with status
-/skills toggle [skill-name]          # Toggle a skill on/off
-/skills sources                      # List all skill sources with status
-/skills sources toggle [source-path] # Toggle an entire source on/off
-/skills sources add <path>           # Add a custom source directory
-/skills sources remove [path]        # Remove a custom source directory
-/skills help                         # Show this help
+/manage-skills                       # Compact status or interactive manager when available
+/manage-skills status                # Compact skill policy status
+/manage-skills                       # Toggle skills in the interactive TUI when available
+/manage-skills status                # Include source policy summary
+/manage-skills                       # Manage source policy from the interactive TUI when available
+/plugin config set skillSources <paths> # Configure custom source directories
+/plugin config set skillSources <paths> # Remove paths by setting the desired list
+/manage-skills help                  # Show this help
 
 ## Skill sources
 Pi discovers skills from built-in paths:
@@ -421,15 +496,15 @@ Pi discovers skills from built-in paths:
 
 This extension also discovers skills from:
   - Claude Code plugin marketplaces
-  - Custom source directories (see /skills sources add)
+  - Custom source directories (see /plugin config set skillSources)
 
 ## Toggling skills
 Toggle individual skills or entire source directories.
 Disabled skills are stripped from the system prompt.
 
-/skills toggle                       # Interactive select in TUI
-/skills toggle my-skill              # Toggle by skill name
-/skills sources toggle               # Interactive source toggle in TUI
+/manage-skills                       # Interactive table in TUI-capable builds
+/manage-skills status                # Compact status in non-TUI mode
+/manage-skills                       # Source controls live in the interactive detail view
 
 This works for ALL skills — Pi-native, plugin, and custom source.`;
 }
@@ -442,15 +517,15 @@ export function filterDisabledSkillsFromPrompt(
 	disabledSkills: Record<string, boolean>,
 	disabledSkillSources: Record<string, boolean>,
 ): string {
-	const disabledPaths = new Set(Object.keys(disabledSkills).filter((p) => disabledSkills[p] === true));
-	const disabledSourcePrefixes = Object.keys(disabledSkillSources).filter((p) => disabledSkillSources[p] === true);
+	const disabledPaths = new Set(Object.keys(disabledSkills).filter((p) => disabledSkills[p] === true).map(normalizePath));
+	const disabledSourcePrefixes = Object.keys(disabledSkillSources).filter((p) => disabledSkillSources[p] === true).map(normalizePath);
 
 	if (disabledPaths.size === 0 && disabledSourcePrefixes.length === 0) return systemPrompt;
 
 	return systemPrompt.replace(/<skill>\s*\n([\s\S]*?)<\/skill>/g, (match, inner: string) => {
 		const locationMatch = inner.match(/<location>(.*?)<\/location>/);
 		if (!locationMatch?.[1]) return match;
-		const skillPath = locationMatch[1];
+		const skillPath = normalizePath(locationMatch[1]);
 
 		if (disabledPaths.has(skillPath)) return "";
 
@@ -459,5 +534,18 @@ export function filterDisabledSkillsFromPrompt(
 		}
 
 		return match;
+	});
+}
+
+export function filterSkillsFromPromptByPolicy(systemPrompt: string, policy: SkillPolicy, cwd?: string, customSourceRoots: string[] = []): string {
+	return systemPrompt.replace(/<skill>\s*\n([\s\S]*?)<\/skill>/g, (match, inner: string) => {
+		const locationMatch = inner.match(/<location>(.*?)<\/location>/);
+		const nameMatch = inner.match(/<name>(.*?)<\/name>/);
+		const rawPath = locationMatch?.[1]?.trim();
+		const skillPath = rawPath ? normalizePath(rawPath) : undefined;
+		const name = nameMatch?.[1]?.trim() || (skillPath ? path.basename(path.dirname(skillPath)) : "");
+		if (!name) return match;
+		const sourceRoot = skillPath ? sourceRootForSkillPath(skillPath, { cwd, customSourceRoots }).sourceRoot : undefined;
+		return evaluateSkillPolicy(policy, { name, path: skillPath, sourceRoot }, cwd).enabled ? match : "";
 	});
 }

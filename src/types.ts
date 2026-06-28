@@ -135,13 +135,32 @@ export type UpdateCheckResult = {
 	plugin: string;
 };
 
+export type SkillPolicyValue = "enabled" | "disabled";
+export type FolderSkillPolicyValue = SkillPolicyValue | "inherit";
+
+export type SkillPolicyRuleSet = {
+	skills: Record<string, SkillPolicyValue>;
+	sources: Record<string, SkillPolicyValue>;
+	names: Record<string, SkillPolicyValue>;
+};
+
+export type SkillPolicy = {
+	schemaVersion: 1;
+	legacyDisabledMigrated: boolean;
+	global: SkillPolicyRuleSet;
+	folders: Record<string, SkillPolicyRuleSet>;
+};
+
 export type State = {
 	version: 1;
 	marketplaces: Record<string, MarketplaceRecord>;
 	plugins: Record<string, InstalledPluginEntry[]>;
 	enabledPlugins: Record<string, boolean>;
+	/** @deprecated migrated to skillPolicy.global.skills and retained only for old-state compatibility. */
 	disabledSkills: Record<string, boolean>;
+	/** @deprecated migrated to skillPolicy.global.sources and retained only for old-state compatibility. */
 	disabledSkillSources: Record<string, boolean>;
+	skillPolicy: SkillPolicy;
 	lastUpdateCheckAt?: string;
 	lastUpdateCheckResults?: Record<string, UpdateCheckResult>;
 };

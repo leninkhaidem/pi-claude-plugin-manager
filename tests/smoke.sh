@@ -126,6 +126,7 @@ run_pi() {
 
 run_pi "/plugin config set claudeReadOnlyImports false" >/dev/null
 run_pi "/plugin help" | grep -q "/plugin browse \[marketplace\]"
+run_pi "/manage-skills help" | grep -q "/manage-skills status"
 run_pi "/plugin marketplace add $MARKETPLACE" | grep -q "Added marketplace fixture-marketplace"
 run_pi "/plugin marketplace list" | grep -q "fixture-marketplace"
 run_pi "/plugin browse fixture-marketplace" | grep -q "/plugin install demo@fixture-marketplace"
@@ -151,21 +152,26 @@ if (state.enabledPlugins['demo@fixture-marketplace'] !== true) throw new Error('
 NODE
 
 NPM_GLOBAL_ROOT="$(npm root -g)"
-MARIOZECHNER_ROOT="$NPM_GLOBAL_ROOT/@mariozechner"
+PI_NODE_ROOTS=("$NPM_GLOBAL_ROOT" "$HOME/.local/lib/node_modules")
 PI_PACKAGE_ROOT=""
 JITI_REGISTER=""
-if [[ -d "$MARIOZECHNER_ROOT/pi-coding-agent" ]]; then
-  PI_PACKAGE_ROOT="$MARIOZECHNER_ROOT/pi-coding-agent"
-  JITI_REGISTER="$PI_PACKAGE_ROOT/node_modules/@mariozechner/jiti/lib/jiti-register.mjs"
-  if [[ ! -f "$JITI_REGISTER" ]]; then
+for PI_NODE_ROOT in "${PI_NODE_ROOTS[@]}"; do
+  MARIOZECHNER_ROOT="$PI_NODE_ROOT/@mariozechner"
+  if [[ -d "$MARIOZECHNER_ROOT/pi-coding-agent" ]]; then
+    PI_PACKAGE_ROOT="$MARIOZECHNER_ROOT/pi-coding-agent"
+    JITI_REGISTER="$PI_PACKAGE_ROOT/node_modules/@mariozechner/jiti/lib/jiti-register.mjs"
+    if [[ ! -f "$JITI_REGISTER" ]]; then
+      JITI_REGISTER="$PI_PACKAGE_ROOT/node_modules/jiti/lib/jiti-register.mjs"
+    fi
+    break
+  elif [[ -d "$PI_NODE_ROOT/@earendil-works/pi-coding-agent" ]]; then
+    PI_PACKAGE_ROOT="$PI_NODE_ROOT/@earendil-works/pi-coding-agent"
     JITI_REGISTER="$PI_PACKAGE_ROOT/node_modules/jiti/lib/jiti-register.mjs"
+    break
   fi
-elif [[ -d "$NPM_GLOBAL_ROOT/@earendil-works/pi-coding-agent" ]]; then
-  PI_PACKAGE_ROOT="$NPM_GLOBAL_ROOT/@earendil-works/pi-coding-agent"
-  JITI_REGISTER="$PI_PACKAGE_ROOT/node_modules/jiti/lib/jiti-register.mjs"
-fi
+done
 if [[ -z "$PI_PACKAGE_ROOT" || ! -f "$JITI_REGISTER" ]]; then
-  echo "Could not resolve Pi's global package or jiti register from npm root: $NPM_GLOBAL_ROOT" >&2
+  echo "Could not resolve Pi's package or jiti register from roots: ${PI_NODE_ROOTS[*]}" >&2
   exit 1
 fi
 if [[ ! -e "$ROOT/node_modules" ]]; then
@@ -189,6 +195,9 @@ JITI_FS_CACHE="$TMP/jiti-cache" PI_CODING_AGENT_DIR="$AGENT" node --import "$JIT
 JITI_FS_CACHE="$TMP/jiti-cache" PI_CODING_AGENT_DIR="$AGENT" node --import "$JITI_REGISTER" "$ROOT/tests/autocomplete-smoke.mjs" | grep -q "autocomplete smoke ok"
 JITI_FS_CACHE="$TMP/jiti-cache" PI_CODING_AGENT_DIR="$AGENT" node --import "$JITI_REGISTER" "$ROOT/tests/marketplace-refresh-diverged.mjs" | grep -q "marketplace refresh diverged smoke ok"
 JITI_FS_CACHE="$TMP/jiti-cache" node --import "$JITI_REGISTER" "$ROOT/tests/update-version-reporting.mjs" | grep -q "update version reporting smoke ok"
+JITI_FS_CACHE="$TMP/jiti-cache" node --import "$JITI_REGISTER" "$ROOT/tests/skill-policy.mjs" | grep -q "skill policy tests ok"
+JITI_FS_CACHE="$TMP/jiti-cache" node --import "$JITI_REGISTER" "$ROOT/tests/manage-skills-enforcement.mjs" | grep -q "manage skills enforcement tests ok"
+JITI_FS_CACHE="$TMP/jiti-cache" node --import "$JITI_REGISTER" "$ROOT/tests/manage-skills-tui.mjs" | grep -q "manage skills tui tests ok"
 
 run_pi "/plugin uninstall demo@fixture-marketplace" | grep -q "demo@fixture-marketplace (user)"
 run_pi "/plugin uninstall browse-demo@fixture-marketplace" | grep -q "browse-demo@fixture-marketplace (user)"

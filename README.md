@@ -24,7 +24,7 @@
 
 ---
 
-`pi-claude-plugin-manager` adds standalone `/plugin` and `/skills` commands to Pi. It adapts Claude Code plugin marketplaces into Pi so you can add marketplaces, install plugins, enable or disable them, update them, uninstall them, and load their skills and slash-command markdown as Pi resources.
+`pi-claude-plugin-manager` adds standalone `/plugin` and `/manage-skills` commands to Pi. It adapts Claude Code plugin marketplaces into Pi so you can add marketplaces, install plugins, enable or disable them, update them, uninstall them, and load their skills and slash-command markdown as Pi resources.
 
 It also has an optional read-only bridge for existing Claude Code installs, so plugins already installed under `~/.claude/plugins` can appear in Pi without copying or mutating Claude Code state.
 
@@ -61,7 +61,7 @@ Then verify the commands are available:
 
 ```text
 /plugin help
-/skills help
+/manage-skills help
 ```
 
 ### Install latest from `main`
@@ -156,14 +156,12 @@ Those paths are configurable; see [Configuration](#configuration).
 ### Skill commands
 
 ```text
-/skills help
-/skills list
-/skills toggle [skill-name]
-/skills sources
-/skills sources toggle [source-path]
-/skills sources add <path>
-/skills sources remove [path]
+/manage-skills          # interactive TUI manager when Pi UI is available
+/manage-skills status   # compact status for scripts/non-TUI use
+/manage-skills help
 ```
+
+`/skills` is intentionally not registered by this extension.
 
 ## Browsing and autocomplete
 
@@ -177,52 +175,40 @@ After adding a marketplace, browse its plugins without knowing plugin names up f
 
 In the interactive Pi TUI, browse lets you choose a marketplace, narrow large plugin lists with a filter, pick a plugin, and install it for user or project scope. In non-interactive mode, browse prints a readable marketplace/plugin list with install commands.
 
-The `/plugin` and `/skills` commands provide argument autocomplete in the TUI. Type part of a command or identifier and press `Tab`:
+The `/plugin` and `/manage-skills` commands provide argument autocomplete in the TUI. Type part of a command or identifier and press `Tab`:
 
 ```text
 /plugin <Tab>
 /plugin marketplace br<Tab>
 /plugin install <Tab>
 /plugin config set <Tab>
-/skills <Tab>
-/skills sources <Tab>
+/manage-skills <Tab>
 ```
 
 ## Skill manager
 
-The `/skills` command manages skills from **all** sources — Pi-native, plugins, and custom directories.
+The `/manage-skills` command is the skill-management surface. In Pi TUI mode, `/manage-skills` opens an interactive custom manager with:
 
-### Listing skills
+- a bounded searchable per-skill table;
+- simplified columns for skill name, current enabled/disabled state, the rule deciding that state, and source;
+- keyboard navigation (`↑`/`↓`), search mode (`/`), direct this-folder enable/disable toggling (`Space`), this-folder reset (`r`), read-only details (`Enter`), advanced policy controls (`a`), and predictable `Esc` back/exit behavior;
+- colored shortcut-key hints in the footer, with mode-specific legends for dashboard, search, details, and advanced policy screens;
+- a read-only details view with the full parsed description, source/package label, path, policy explanation, and enforcement mode;
+- advanced policy actions for global defaults and source-level controls, kept out of the default dashboard/details flow.
 
-```text
-/skills list
-```
-
-Shows all skills grouped by source (Pi discovery paths, Pi packages, plugin marketplaces, custom sources) with enabled/disabled status.
-
-### Toggling skills
-
-Toggle individual skills or entire source directories. In the TUI, use the checkbox UI (space to toggle, enter to apply, escape to cancel):
+In non-TUI mode it prints compact actionable status/help rather than a full static manager:
 
 ```text
-/skills toggle                   # Interactive checkbox in TUI
-/skills toggle my-skill          # Toggle by name
-/skills sources toggle           # Toggle entire sources in TUI
+/manage-skills
+/manage-skills status
+/manage-skills help
 ```
 
-Disabled skills are stripped from the system prompt via the `before_agent_start` hook.
+Disabled skills are stripped from the system prompt with `before_agent_start`. Explicit `/skill:<name>` invocations for disabled skills are blocked before Pi expands skill content. For manager-owned plugin/custom-source skills, disabled skill paths and disabled source paths are also omitted from `resources_discover` after `/reload`; re-enabled paths reappear after `/reload`. External Pi/package skills may still be visible in Pi-owned lists, but disabled entries are prompt-filtered and `/skill` blocked.
 
-### Managing skill sources
+Policy has two scopes: global default and the started folder, with the started-folder override winning when present. Toggle, reset, and advanced policy changes save immediately to manager-owned user state under Pi's agent directory, not to repo-local files.
 
-View all skill discovery sources, including Pi's built-in paths:
-
-```text
-/skills sources                  # Interactive menu in TUI, or list sources
-/skills sources add <path>       # Add a custom source directory
-/skills sources remove [path]    # Remove a custom source
-```
-
-Sources include Pi's built-in paths (`~/.pi/agent/skills/`, `~/.agents/skills/`, `.pi/skills/`, `.agents/skills/`), installed Pi packages, Claude Code plugin marketplaces, and custom directories you add.
+Sources include Pi's built-in paths (`~/.pi/agent/skills/`, `~/.agents/skills/`, `.pi/skills/`, `.agents/skills/`), installed Pi packages, Claude Code plugin marketplaces, and custom directories configured with `skillSources`.
 
 ## Auto-update checks
 
@@ -343,7 +329,7 @@ Local marketplace while developing:
 - Claude plugin skills as Pi skills.
 - Claude plugin command markdown as Pi prompt templates.
 - Skill management across all sources (Pi-native, plugin, custom).
-- Skill and source toggling with interactive checkbox UI.
+- Skill and source management with the interactive `/manage-skills` TUI.
 - Auto-update checks with configurable TTL and notification modes.
 - Interactive config editor in TUI.
 - Optional read-only import from Claude Code's existing install state.
