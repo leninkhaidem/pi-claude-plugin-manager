@@ -190,9 +190,11 @@ The `/plugin` and `/manage-skills` commands provide argument autocomplete in the
 The `/manage-skills` command is the skill-management surface. In Pi TUI mode, `/manage-skills` opens an interactive custom manager with:
 
 - a bounded searchable per-skill table;
-- columns for skill name, global default, this-folder override, effective state, winning scope, and enforcement mode;
-- keyboard navigation (`↑`/`↓`), search (`/`), column switching (`Tab`), immediate cycling (`Space`), detail view (`Enter`), and predictable `Esc` back/exit behavior;
-- a detail view with full description, source/package label, path, policy state, enforcement mode, and skill/source actions.
+- simplified columns for skill name, current enabled/disabled state, the rule deciding that state, and source;
+- keyboard navigation (`↑`/`↓`), search mode (`/`), direct this-folder enable/disable toggling (`Space`), this-folder reset (`r`), read-only details (`Enter`), advanced policy controls (`a`), and predictable `Esc` back/exit behavior;
+- colored shortcut-key hints in the footer, with mode-specific legends for dashboard, search, details, and advanced policy screens;
+- a read-only details view with the full parsed description, source/package label, path, policy explanation, and enforcement mode;
+- advanced policy actions for global defaults and source-level controls, kept out of the default dashboard/details flow.
 
 In non-TUI mode it prints compact actionable status/help rather than a full static manager:
 
@@ -204,7 +206,7 @@ In non-TUI mode it prints compact actionable status/help rather than a full stat
 
 Disabled skills are stripped from the system prompt with `before_agent_start`. Explicit `/skill:<name>` invocations for disabled skills are blocked before Pi expands skill content. For manager-owned plugin/custom-source skills, disabled skill paths and disabled source paths are also omitted from `resources_discover` after `/reload`; re-enabled paths reappear after `/reload`. External Pi/package skills may still be visible in Pi-owned lists, but disabled entries are prompt-filtered and `/skill` blocked.
 
-Policy has two scopes: global default and the started folder, with the started-folder override winning when present. Toggle/cycle changes save immediately to manager-owned user state under Pi's agent directory, not to repo-local files.
+Policy has two scopes: global default and the started folder, with the started-folder override winning when present. Toggle, reset, and advanced policy changes save immediately to manager-owned user state under Pi's agent directory, not to repo-local files.
 
 Sources include Pi's built-in paths (`~/.pi/agent/skills/`, `~/.agents/skills/`, `.pi/skills/`, `.agents/skills/`), installed Pi packages, Claude Code plugin marketplaces, and custom directories configured with `skillSources`.
 
