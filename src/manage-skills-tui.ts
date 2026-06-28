@@ -36,19 +36,24 @@ type ManageSkillsTuiOptions = {
 	onSaved?: () => void;
 };
 
-type ViewMode = "dashboard" | "actions" | "description";
+type ViewMode = "dashboard" | "advanced" | "description";
 
 type DetailAction = {
 	label: string;
 	run: () => void;
 };
 
+type ShortcutHint = {
+	key: string;
+	label: string;
+};
+
 type StatusKind = "info" | "success" | "warning" | "error";
 
-const TABLE_ROW_LIMIT = 6;
-const NARROW_TABLE_ROW_LIMIT = 3;
+const TABLE_ROW_LIMIT = 8;
+const NARROW_TABLE_ROW_LIMIT = 5;
 const DETAIL_DESCRIPTION_WIDTH_FALLBACK = 40;
-const DESCRIPTION_VIEWPORT_LINES = 11;
+const DESCRIPTION_VIEWPORT_LINES = 13;
 const WIDE_SPLIT_MIN_WIDTH = 68;
 
 export class ManageSkillsTui implements Component {
@@ -68,8 +73,9 @@ export class ManageSkillsTui implements Component {
 	private editingSearch = false;
 	private detailActionIndex = 0;
 	private descriptionScrollTop = 0;
+	private descriptionWrapWidth = DETAIL_DESCRIPTION_WIDTH_FALLBACK;
 	private rowLimit = TABLE_ROW_LIMIT;
-	private status = "Space cycles this-folder override. g cycles global default.";
+	private status = "Space toggles this folder. Enter opens details. a opens advanced policy controls.";
 	private statusKind: StatusKind = "info";
 	private saveError: string | undefined;
 	private hasUnsavedPolicy = false;
@@ -102,7 +108,7 @@ export class ManageSkillsTui implements Component {
 			this.handleSearchInput(data);
 			return;
 		}
-		if (this.mode === "actions") {
+		if (this.mode === "advanced") {
 			this.handleActionInput(data);
 			return;
 		}
@@ -117,7 +123,7 @@ export class ManageSkillsTui implements Component {
 		if (this.cachedLines && this.cachedWidth === width) return this.cachedLines;
 		const safeWidth = Math.max(1, width);
 		const contentWidth = Math.max(1, safeWidth - 4);
-		const lines = this.mode === "actions" ? this.renderActionDrawer(contentWidth) : this.mode === "description" ? this.renderDescriptionDrawer(contentWidth) : this.renderDashboard(contentWidth);
+		const lines = this.mode === "advanced" ? this.renderAdvancedDrawer(contentWidth) : this.mode === "description" ? this.renderDescriptionDrawer(contentWidth) : this.renderDashboard(contentWidth);
 		this.cachedWidth = width;
 		this.cachedLines = frameLines(lines, safeWidth, this.style("borderAccent", "─"));
 		return this.cachedLines;
@@ -182,39 +188,31 @@ export class ManageSkillsTui implements Component {
 			this.moveSelection(1, rows.length);
 			return;
 		}
-		if (matchesKey(data, Key.enter)) {
-			if (rows.length === 0) return;
-			this.mode = "actions";
-			this.detailActionIndex = 0;
-			this.setStatus("Choose an action. Enter saves immediately; Escape returns to the dashboard.");
-			this.invalidateAndRender();
-			return;
-		}
-		if (matchesKey(data, Key.space) || matchesKey(data, "f")) {
-			const skill = rows[this.selected];
-			if (!skill) return;
-			this.setSkillFolder(skill, cycleFolder(skill.folderState));
-			return;
-		}
-		if (matchesKey(data, "g")) {
-			const skill = rows[this.selected];
-			if (!skill) return;
-			this.setSkillGlobal(skill, cycleGlobal(skill.globalState));
-			return;
-		}
-		if (matchesKey(data, "s")) {
-			if (rows.length === 0) return;
-			this.mode = "actions";
-			this.detailActionIndex = firstSourceActionIndex();
-			this.setStatus("Source actions selected. Enter saves immediately; Escape returns.");
-			this.invalidateAndRender();
-			return;
-		}
-		if (matchesKey(data, "d")) {
+		if (matchesKey(data, Key.enter) || matchesKey(data, "d")) {
 			if (rows.length === 0) return;
 			this.mode = "description";
 			this.descriptionScrollTop = 0;
-			this.setStatus("Full description view. Scroll with ↑↓; Escape returns.");
+			this.setStatus("Details view. Scroll with ↑↓; Escape returns.");
+			this.invalidateAndRender();
+			return;
+		}
+		if (matchesKey(data, Key.space)) {
+			const skill = rows[this.selected];
+			if (!skill) return;
+			this.toggleSkillForFolder(skill);
+			return;
+		}
+		if (matchesKey(data, "r")) {
+			const skill = rows[this.selected];
+			if (!skill) return;
+			this.resetSkillFolderOverride(skill);
+			return;
+		}
+		if (matchesKey(data, "a")) {
+			if (rows.length === 0) return;
+			this.mode = "advanced";
+			this.detailActionIndex = 0;
+			this.setStatus("Advanced policy controls. Enter saves immediately; Escape returns.");
 			this.invalidateAndRender();
 			return;
 		}
@@ -252,7 +250,7 @@ export class ManageSkillsTui implements Component {
 	private handleDescriptionInput(data: string): void {
 		const skill = this.selectedSkill();
 		const description = skill?.description.trim() || "(no description)";
-		const wrapped = wrapTextWithAnsi(description, Math.max(10, DETAIL_DESCRIPTION_WIDTH_FALLBACK));
+		const wrapped = wrapTextWithAnsi(description, this.descriptionWrapWidth);
 		const maxTop = Math.max(0, wrapped.length - DESCRIPTION_VIEWPORT_LINES);
 		if (matchesKey(data, Key.escape) || matchesKey(data, "b") || matchesKey(data, Key.left)) {
 			this.mode = "dashboard";
@@ -317,6 +315,19 @@ export class ManageSkillsTui implements Component {
 		this.applyPolicyChange(`Saved this-folder override: ${skill.name} → ${value}.`, (state) => {
 			setFolderSkillPolicy(state.skillPolicy, this.cwd, skillSubject(skill), value);
 		});
+	}
+
+	private toggleSkillForFolder(skill: SkillInfo): void {
+		this.setSkillFolder(skill, skill.effectiveState === "enabled" ? "disabled" : "enabled");
+	}
+
+	private resetSkillFolderOverride(skill: SkillInfo): void {
+		if (skill.folderState === "inherit") {
+			this.setStatus(`No this-folder override for ${skill.name}; already using ${ruleDetails(skill)}.`);
+			this.invalidateAndRender();
+			return;
+		}
+		this.setSkillFolder(skill, "inherit");
 	}
 
 	private setSourceGlobal(skill: SkillInfo, value: SkillPolicyValue): void {
@@ -412,16 +423,16 @@ export class ManageSkillsTui implements Component {
 	private detailActions(skill: SkillInfo | undefined): DetailAction[] {
 		if (!skill) return [];
 		return [
-			{ label: "This folder: inherit", run: () => this.setSkillFolder(skill, "inherit") },
-			{ label: "This folder: enabled", run: () => this.setSkillFolder(skill, "enabled") },
-			{ label: "This folder: disabled", run: () => this.setSkillFolder(skill, "disabled") },
-			{ label: "Global default: enabled", run: () => this.setSkillGlobal(skill, "enabled") },
-			{ label: "Global default: disabled", run: () => this.setSkillGlobal(skill, "disabled") },
-			{ label: "Source: enable globally", run: () => this.setSourceGlobal(skill, "enabled") },
-			{ label: "Source: disable globally", run: () => this.setSourceGlobal(skill, "disabled") },
-			{ label: "Source for this folder: inherit", run: () => this.setSourceFolder(skill, "inherit") },
-			{ label: "Source for this folder: enabled", run: () => this.setSourceFolder(skill, "enabled") },
-			{ label: "Source for this folder: disabled", run: () => this.setSourceFolder(skill, "disabled") },
+			{ label: "Reset this-folder override (inherit)", run: () => this.setSkillFolder(skill, "inherit") },
+			{ label: "Enable this skill in this folder", run: () => this.setSkillFolder(skill, "enabled") },
+			{ label: "Disable this skill in this folder", run: () => this.setSkillFolder(skill, "disabled") },
+			{ label: "Set global default: enabled", run: () => this.setSkillGlobal(skill, "enabled") },
+			{ label: "Set global default: disabled", run: () => this.setSkillGlobal(skill, "disabled") },
+			{ label: "Set source globally: enabled", run: () => this.setSourceGlobal(skill, "enabled") },
+			{ label: "Set source globally: disabled", run: () => this.setSourceGlobal(skill, "disabled") },
+			{ label: "Reset source for this folder (inherit)", run: () => this.setSourceFolder(skill, "inherit") },
+			{ label: "Enable source in this folder", run: () => this.setSourceFolder(skill, "enabled") },
+			{ label: "Disable source in this folder", run: () => this.setSourceFolder(skill, "disabled") },
 		];
 	}
 
@@ -486,9 +497,8 @@ export class ManageSkillsTui implements Component {
 		const cols = skillTableWidths(width);
 		return this.dim(joinColumns([
 			fit("Skill", cols.name),
-			fit("G", cols.global),
-			fit("F", cols.folder),
-			fit("Eff", cols.effective),
+			fit("Current", cols.current),
+			fit("Rule", cols.rule),
 			fit("Source", cols.source),
 		]));
 	}
@@ -499,9 +509,8 @@ export class ManageSkillsTui implements Component {
 		const name = `${selected ? "❯" : " "} ${skill.name}${duplicateHint}`;
 		const row = joinColumns([
 			fit(name, cols.name),
-			fit(stateIcon(skill.globalState), cols.global),
-			fit(stateIcon(skill.folderState), cols.folder),
-			fit(stateIcon(skill.effectiveState), cols.effective),
+			fit(currentLabel(skill), cols.current),
+			fit(ruleLabel(skill), cols.rule),
 			fit(sourceBadge(skill), cols.source),
 		]);
 		return selected ? this.selectedRow(fit(row, width)) : fit(row, width);
@@ -509,7 +518,6 @@ export class ManageSkillsTui implements Component {
 
 	private renderSelectedSkillPane(width: number, skill: SkillInfo | undefined): string[] {
 		if (!skill) return [this.titleLine("Selected skill", width), "No selected skill.", "", "Try a broader search."].map((line) => fit(line, width));
-		const source = this.sourceFor(skill);
 		const description = skill.description.trim() || "(no description)";
 		const descriptionWidth = Math.max(10, Math.min(width - 2, DETAIL_DESCRIPTION_WIDTH_FALLBACK));
 		const descriptionLines = wrapTextWithAnsi(description, descriptionWidth).slice(0, 2).map((line) => `  ${line}`);
@@ -518,11 +526,11 @@ export class ManageSkillsTui implements Component {
 			this.dim(fit(skill.sourceLabel, width)),
 			"Description",
 			...descriptionLines,
-			`Path ${skill.path}`,
-			`Policy G:${skill.globalState} F:${skill.folderState} Eff:${skill.effectiveState}`,
-			`Winner ${skill.winningScope}/${skill.winningTarget}`,
-			`Source G:${source?.globalState ?? "enabled"} F:${source?.folderState ?? "inherit"} (${source?.winningScope ?? "global"}/${source?.winningTarget ?? "default"})`,
-			`Enforce ${enforcementMode(skill)}`,
+			`Current: ${stateText(skill.effectiveState)}`,
+			`Rule: ${ruleDetails(skill)}`,
+			`This folder override: ${folderStateText(skill.folderState)}`,
+			`Path: ${skill.path}`,
+			`Enforcement: ${enforcementMode(skill)}`,
 		];
 		return lines.map((line) => fit(line, width));
 	}
@@ -533,24 +541,34 @@ export class ManageSkillsTui implements Component {
 		return [
 			this.titleLine(`Selected: ${skill.name}`, width),
 			`Desc: ${description}`,
-			`Policy: G ${skill.globalState} • F ${skill.folderState} • Eff ${skill.effectiveState}`,
+			`Current: ${stateText(skill.effectiveState)} • Rule: ${ruleDetails(skill)}`,
 		].map((line) => fit(line, width));
 	}
 
 	private renderFooter(width: number): string[] {
 		return [
-			fit("Space folder • g global • Enter actions • d description • / search • Esc close", width),
+			this.shortcutLegend(width, [
+				{ key: "Space", label: "toggle this folder" },
+				{ key: "Enter", label: "details" },
+				{ key: "/", label: "search" },
+				{ key: "a", label: "advanced" },
+				{ key: "r", label: "reset" },
+				{ key: "Esc", label: "close" },
+			]),
 			this.statusLine(width),
 		];
 	}
 
-	private renderActionDrawer(width: number): string[] {
+	private renderAdvancedDrawer(width: number): string[] {
 		const skill = this.selectedSkill();
-		if (!skill) return [centerTitle(this.title("Actions"), width), "No selected skill.", "Esc back"].map((line) => fit(line, width));
+		if (!skill) return [centerTitle(this.title("Advanced policy"), width), "No selected skill.", this.shortcutLegend(width, [{ key: "Esc", label: "back" }])].map((line) => fit(line, width));
+		const source = this.sourceFor(skill);
 		const actions = this.detailActions(skill);
 		const lines = [
-			centerTitle(this.title(`Actions for ${skill.name}`), width),
-			fit(`Effective state: ${skill.effectiveState} by ${skill.winningScope}/${skill.winningTarget}`, width),
+			centerTitle(this.title(`Advanced policy: ${skill.name}`), width),
+			fit(`Current: ${stateText(skill.effectiveState)} • Rule: ${ruleDetails(skill)}`, width),
+			fit(`This folder override: ${folderStateText(skill.folderState)} • Source: ${source?.label ?? skill.sourceLabel}`, width),
+			fit(`Source rule: ${sourceRuleDetails(source)} • Global default: ${stateText(skill.globalState)}`, width),
 			repeatToWidth("─", width),
 		];
 		for (let i = 0; i < actions.length; i++) {
@@ -560,15 +578,20 @@ export class ManageSkillsTui implements Component {
 		}
 		lines.push(repeatToWidth("─", width));
 		lines.push(this.statusLine(width));
-		lines.push(this.dim(fit("↑↓ choose • Enter save immediately • Esc back", width)));
+		lines.push(this.shortcutLegend(width, [
+			{ key: "↑↓", label: "choose" },
+			{ key: "Enter", label: "save immediately" },
+			{ key: "Esc", label: "back" },
+		]));
 		return lines.map((line) => fit(line, width));
 	}
 
 	private renderDescriptionDrawer(width: number): string[] {
 		const skill = this.selectedSkill();
-		if (!skill) return [centerTitle(this.title("Description"), width), "No selected skill.", "Esc back"].map((line) => fit(line, width));
+		if (!skill) return [centerTitle(this.title("Details"), width), "No selected skill.", this.shortcutLegend(width, [{ key: "Esc", label: "back" }])].map((line) => fit(line, width));
 		const description = skill.description.trim() || "(no description)";
-		const wrapped = wrapTextWithAnsi(description, Math.max(10, width - 2));
+		this.descriptionWrapWidth = Math.max(10, width - 2);
+		const wrapped = wrapTextWithAnsi(description, this.descriptionWrapWidth);
 		const maxTop = Math.max(0, wrapped.length - DESCRIPTION_VIEWPORT_LINES);
 		this.descriptionScrollTop = Math.min(this.descriptionScrollTop, maxTop);
 		const visible = wrapped.slice(this.descriptionScrollTop, this.descriptionScrollTop + DESCRIPTION_VIEWPORT_LINES);
@@ -576,13 +599,16 @@ export class ManageSkillsTui implements Component {
 		const start = wrapped.length === 0 ? 0 : this.descriptionScrollTop + 1;
 		const end = Math.min(wrapped.length, this.descriptionScrollTop + DESCRIPTION_VIEWPORT_LINES);
 		return [
-			centerTitle(this.title(`Description: ${skill.name}`), width),
+			centerTitle(this.title(`Details: ${skill.name}`), width),
 			this.dim(fit(skill.sourceLabel, width)),
+			fit(`Current: ${stateText(skill.effectiveState)} • Rule: ${ruleDetails(skill)}`, width),
+			fit(`Path: ${skill.path}`, width),
 			repeatToWidth("─", width),
 			...visible.map((line) => fit(line, width)),
-			fit(`${start}-${end} of ${wrapped.length} description lines`, width),
-			repeatToWidth("─", width),
-			this.dim(fit("↑↓ scroll • Esc back", width)),
+			this.shortcutLegend(width, [
+				{ key: "↑↓", label: "scroll" },
+				{ key: "Esc", label: "back" },
+			], `${start}-${end} of ${wrapped.length} description lines`),
 		].map((line) => fit(line, width));
 	}
 
@@ -622,6 +648,20 @@ export class ManageSkillsTui implements Component {
 		return this.style("dim", value);
 	}
 
+	private shortcutLegend(width: number, shortcuts: ShortcutHint[], prefix?: string): string {
+		const separator = this.dim(" • ");
+		const parts = [
+			...(prefix ? [this.dim(prefix)] : []),
+			...shortcuts.map((shortcut) => `${this.shortcutKey(shortcut.key)} ${this.dim(shortcut.label)}`),
+		];
+		return fit(parts.join(separator), width);
+	}
+
+	private shortcutKey(value: string): string {
+		const bold = this.theme?.bold?.(value) ?? value;
+		return this.style("accent", bold);
+	}
+
 	private selectedRow(value: string): string {
 		return this.theme?.bg?.("selectedBg", value) ?? this.style("accent", value);
 	}
@@ -648,24 +688,33 @@ function cloneState(state: State): State {
 	return JSON.parse(JSON.stringify(state)) as State;
 }
 
-function cycleGlobal(value: SkillPolicyValue): SkillPolicyValue {
-	return value === "enabled" ? "disabled" : "enabled";
+function stateText(value: SkillPolicyValue): string {
+	return value === "enabled" ? "enabled" : "disabled";
 }
 
-function cycleFolder(value: FolderSkillPolicyValue): FolderSkillPolicyValue {
-	if (value === "inherit") return "disabled";
-	if (value === "disabled") return "enabled";
-	return "inherit";
+function folderStateText(value: FolderSkillPolicyValue): string {
+	return value === "inherit" ? "inherit" : stateText(value);
 }
 
-function firstSourceActionIndex(): number {
-	return 5;
+function currentLabel(skill: SkillInfo): string {
+	return skill.effectiveState === "enabled" ? "on" : "off";
 }
 
-function stateIcon(value: SkillPolicyValue | FolderSkillPolicyValue): string {
-	if (value === "enabled") return "●";
-	if (value === "disabled") return "✕";
-	return "—";
+function ruleLabel(skill: SkillInfo): string {
+	if (skill.winningScope === "folder") return "folder";
+	if (skill.winningTarget === "default") return "default";
+	return skill.winningTarget;
+}
+
+function ruleDetails(skill: SkillInfo): string {
+	const target = skill.winningTarget === "default" ? "default" : `${skill.winningTarget} rule`;
+	return skill.winningScope === "folder" ? `this folder ${target}` : `global ${target}`;
+}
+
+function sourceRuleDetails(source: SkillSourceInfo | undefined): string {
+	if (!source) return "enabled by default";
+	const target = source.winningTarget === "default" ? "default" : `${source.winningScope} source rule`;
+	return `${stateText(source.effectiveState)} by ${target}`;
 }
 
 function sourceBadge(skill: SkillInfo): string {
@@ -686,14 +735,13 @@ function rowLimitForWidth(width: number): number {
 	return width < WIDE_SPLIT_MIN_WIDTH ? NARROW_TABLE_ROW_LIMIT : TABLE_ROW_LIMIT;
 }
 
-function skillTableWidths(width: number): { name: number; global: number; folder: number; effective: number; source: number } {
-	const global = 3;
-	const folder = 3;
-	const effective = 4;
+function skillTableWidths(width: number): { name: number; current: number; rule: number; source: number } {
+	const current = width >= 42 ? 8 : 7;
+	const rule = width >= 42 ? 12 : 8;
 	const source = width >= 44 ? 8 : 6;
-	const spaces = 4;
-	const name = Math.max(8, width - global - folder - effective - source - spaces);
-	return { name, global, folder, effective, source };
+	const spaces = 3;
+	const name = Math.max(6, width - current - rule - source - spaces);
+	return { name, current, rule, source };
 }
 
 function joinColumns(values: string[]): string {

@@ -280,7 +280,7 @@ async function runManageSkillsTui(pi: ExtensionAPI, ctx: ExtensionCommandContext
 		onSaved: clearRuntimeCaches,
 	}), {
 		overlay: true,
-		overlayOptions: { anchor: "center", width: "90%", minWidth: 50, maxHeight: "80%" },
+		overlayOptions: { anchor: "center", width: "90%", minWidth: 50, maxHeight: "90%" },
 	});
 	if (result?.changed) {
 		await emit(pi, ctx, "Skill policy updated. Disabled skills are prompt-filtered and /skill blocked immediately; run /reload to refresh manager-owned discovered skills.");
@@ -296,7 +296,7 @@ function formatManageSkillsHelp(): string {
 /manage-skills status     # Compact skill policy status
 /manage-skills help       # Show this help
 
-The interactive manager shows a searchable per-skill table with global defaults, this-folder overrides, effective state, and detail actions for skill and source policy.
+The interactive manager shows a searchable per-skill table with Current/Rule status. Space toggles the selected skill for this folder, Enter opens read-only details, and advanced policy controls live behind the 'a' screen.
 
 Disabled skills are removed from the model prompt and explicit /skill:<name> invocations are blocked before skill expansion. Manager-owned disabled skills and sources are omitted from resource discovery after /reload; re-enabled resources reappear after /reload.
 

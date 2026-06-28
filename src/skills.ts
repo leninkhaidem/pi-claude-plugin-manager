@@ -43,15 +43,58 @@ function parseFrontmatter(content: string): Record<string, string> {
 	const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
 	if (!match?.[1]) return {};
 	const result: Record<string, string> = {};
-	for (const line of match[1].split(/\r?\n/)) {
+	const lines = match[1].split(/\r?\n/);
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i]!;
 		const colon = line.indexOf(":");
-		if (colon > 0) {
-			const key = line.slice(0, colon).trim();
-			const value = line.slice(colon + 1).trim();
-			result[key] = value;
+		if (colon <= 0 || /^\s/.test(line)) continue;
+		const key = line.slice(0, colon).trim();
+		const value = line.slice(colon + 1).trim();
+		if (/^[>|][+-]?$/.test(value)) {
+			const blockLines: string[] = [];
+			for (i = i + 1; i < lines.length; i++) {
+				const blockLine = lines[i]!;
+				if (blockLine.trim() !== "" && !/^\s/.test(blockLine)) {
+					i--;
+					break;
+				}
+				blockLines.push(blockLine);
+			}
+			result[key] = value.startsWith("|") ? literalBlock(blockLines).trim() : foldedBlock(blockLines).trim();
+			continue;
 		}
+		result[key] = value;
 	}
 	return result;
+}
+
+function literalBlock(lines: string[]): string {
+	return stripCommonIndent(lines).join("\n");
+}
+
+function foldedBlock(lines: string[]): string {
+	const stripped = stripCommonIndent(lines);
+	const paragraphs: string[] = [];
+	let current: string[] = [];
+	for (const line of stripped) {
+		if (line.trim() === "") {
+			if (current.length > 0) {
+				paragraphs.push(current.join(" ").trim());
+				current = [];
+			}
+			if (paragraphs.at(-1) !== "") paragraphs.push("");
+		} else {
+			current.push(line.trim());
+		}
+	}
+	if (current.length > 0) paragraphs.push(current.join(" ").trim());
+	return paragraphs.join("\n");
+}
+
+function stripCommonIndent(lines: string[]): string[] {
+	const indents = lines.filter((line) => line.trim() !== "").map((line) => line.match(/^\s*/)?.[0].length ?? 0);
+	const indent = indents.length > 0 ? Math.min(...indents) : 0;
+	return lines.map((line) => line.slice(Math.min(indent, line.length)));
 }
 
 export async function readSkillInfo(skillPath: string): Promise<{ name: string; description: string } | undefined> {
