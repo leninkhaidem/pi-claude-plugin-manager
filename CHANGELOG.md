@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- Updated Pi package peer dependencies and imports to the `@earendil-works` scope so installs no longer pull deprecated `@mariozechner` Pi packages.
+
 ## [0.6.0] - 2026-06-28
 
 ### Added
