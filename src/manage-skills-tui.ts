@@ -547,18 +547,18 @@ export class ManageSkillsTui implements Component {
 
 	private renderFooter(width: number): string[] {
 		const shortcuts = this.editingSearch ? [
+			{ key: "Esc", label: "close search" },
 			{ key: "Type", label: "filter all skills" },
 			{ key: "Backspace", label: "delete" },
 			{ key: "Ctrl-U", label: "clear" },
 			{ key: "Enter", label: "apply" },
-			{ key: "Esc", label: "close search" },
 		] : [
+			{ key: "Esc", label: "close" },
 			{ key: "Space", label: "toggle this folder" },
 			{ key: "Enter", label: "details" },
 			{ key: "/", label: "search" },
 			{ key: "a", label: "advanced" },
 			{ key: "r", label: "reset" },
-			{ key: "Esc", label: "close" },
 		];
 		return [
 			this.shortcutLegend(width, shortcuts),
@@ -586,9 +586,9 @@ export class ManageSkillsTui implements Component {
 		lines.push(repeatToWidth("─", width));
 		lines.push(this.statusLine(width));
 		lines.push(this.shortcutLegend(width, [
+			{ key: "Esc", label: "back" },
 			{ key: "↑↓", label: "choose" },
 			{ key: "Enter", label: "save immediately" },
-			{ key: "Esc", label: "back" },
 		]));
 		return lines.map((line) => fit(line, width));
 	}
@@ -613,8 +613,8 @@ export class ManageSkillsTui implements Component {
 			repeatToWidth("─", width),
 			...visible.map((line) => fit(line, width)),
 			this.shortcutLegend(width, [
-				{ key: "↑↓", label: "scroll" },
 				{ key: "Esc", label: "back" },
+				{ key: "↑↓", label: "scroll" },
 			], `${start}-${end} of ${wrapped.length} description lines`),
 		].map((line) => fit(line, width));
 	}
