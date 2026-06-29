@@ -131,6 +131,8 @@ try {
 	assert.match(dashboard, /Alpha full description/, "selected skill description appears in the detail pane");
 	assert.doesNotMatch(dashboard, /TAIL-MARKER-ALPHA-DESCRIPTION/, "dashboard detail preview stays compact");
 	assert.doesNotMatch(dashboard, /g global|Enter actions|Set source globally|G\s+F\s+Eff/, "main dashboard does not advertise old global/source/action shortcuts");
+	assert.match(renderText(component, 50), /Esc close/, "narrow dashboard footer keeps the close shortcut visible");
+	assert.match(renderText(component, 72), /Esc close/, "common-width dashboard footer keeps the close shortcut visible");
 	const selectedAlphaLine = dashboard.split("\n").find((line) => line.includes("❯ alpha")) ?? "";
 	const leftPaneSegment = selectedAlphaLine.split("│")[1] ?? selectedAlphaLine;
 	assert.ok(!leftPaneSegment.includes("Alpha full description"), "skill table row does not inline descriptions");
@@ -144,7 +146,8 @@ try {
 
 	component.handleInput("/");
 	let searchMode = renderText(component, 110);
-	assert.match(searchMode, /Type filter all skills\s+• Backspace delete\s+• Ctrl-U clear\s+• Enter apply\s+• Esc close search/, "active search mode shows search-specific key hints");
+	assert.match(searchMode, /Esc close search\s+• Type filter all skills\s+• Backspace delete\s+• Ctrl-U clear\s+• Enter apply/, "active search mode shows search-specific key hints");
+	assert.match(renderText(component, 72), /Esc close search/, "common-width search footer keeps the close-search shortcut visible");
 	assert.doesNotMatch(searchMode, /Space toggle this folder|Enter details|a advanced|r reset/, "search footer does not advertise dashboard mutation keys");
 	for (const ch of "special") component.handleInput(ch);
 	component.handleInput("\r");
@@ -225,10 +228,10 @@ try {
 	const themedRaw = renderText(themedComponent, 120);
 	assert.match(themedRaw, /\x1b\[/, "themed shortcut legend uses ANSI styling through the theme callback");
 	let themedPlain = stripAnsi(themedRaw);
-	assert.match(themedPlain, /Space toggle this folder\s+• Enter details\s+• \/ search\s+• a advanced\s+• r reset\s+• Esc close/, "stripped shortcut legend remains clear");
+	assert.match(themedPlain, /Esc close\s+• Space toggle this folder\s+• Enter details\s+• \/ search\s+• a advanced\s+• r reset/, "stripped shortcut legend remains clear");
 	themedComponent.handleInput("/");
 	themedPlain = stripAnsi(renderText(themedComponent, 120));
-	assert.match(themedPlain, /Type filter all skills\s+• Backspace delete\s+• Ctrl-U clear\s+• Enter apply\s+• Esc close search/, "themed search footer switches to search-specific hints");
+	assert.match(themedPlain, /Esc close search\s+• Type filter all skills\s+• Backspace delete\s+• Ctrl-U clear\s+• Enter apply/, "themed search footer switches to search-specific hints");
 	assert.doesNotMatch(themedPlain, /Space toggle this folder|Enter details|a advanced|r reset/, "themed search footer hides dashboard mutation hints");
 	assertWidthSafe(themedComponent, [50, 86, 120]);
 
