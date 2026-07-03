@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-07-03
+
+### Fixed
+
+- Fixed Manage Skills folder-scoped disables so prompt filtering and explicit `/skill:<name>` blocking use the active folder context, including manager-owned plugin and custom-source skills that are omitted from discovery while disabled.
+
 ## [0.6.2] - 2026-06-29
 
 ### Fixed
