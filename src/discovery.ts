@@ -73,6 +73,30 @@ export async function claudePluginEntriesForCwd(cwd: string, skipKeys = new Set<
 	return result;
 }
 
+export async function discoverManagerOwnedSkillPathsForCwd(state: State, cwd: string, customSourceRoots: string[] = []): Promise<string[]> {
+	const piManaged = installedEntriesForCwd(state, cwd);
+	const piManagedKeys = piManagedKeysForCwd(state, cwd);
+	const skillPaths: string[] = [];
+
+	for (const { entry } of piManaged) {
+		const resources = await collectResourcesFromPluginRoot(entry.installPath, entry.manifest, entry.marketplaceEntry);
+		skillPaths.push(...resources.skillPaths);
+	}
+
+	for (const { installPath } of await claudePluginEntriesForCwd(cwd, piManagedKeys)) {
+		const manifest = await readPluginManifest(installPath);
+		const resources = await collectResourcesFromPluginRoot(installPath, manifest);
+		skillPaths.push(...resources.skillPaths);
+	}
+
+	if (customSourceRoots.length > 0) {
+		const customSkills = await discoverSkillsFromSources(customSourceRoots);
+		skillPaths.push(...customSkills);
+	}
+
+	return [...new Set(skillPaths.map(normalizePath))].sort((a, b) => a.localeCompare(b));
+}
+
 async function discoverInstalledResources(cwd: string): Promise<{ skillPaths: string[]; promptPaths: string[]; agentEntries: AgentEntry[] }> {
 	const state = await readState();
 	const piManaged = installedEntriesForCwd(state, cwd);

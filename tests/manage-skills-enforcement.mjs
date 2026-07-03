@@ -31,10 +31,10 @@ try {
 	const commandsModule = commandsModuleRaw.default ?? commandsModuleRaw;
 	const extensionFactory = extensionModuleRaw.default?.default ?? extensionModuleRaw.default ?? extensionModuleRaw;
 	const { defaultState, writeConfig, writeState } = stateModule;
-	const { defaultSkillPolicy, setGlobalSkillPolicy, setGlobalSourcePolicy } = policyModule;
+	const { defaultSkillPolicy, setFolderSkillPolicy, setGlobalSkillPolicy, setGlobalSourcePolicy } = policyModule;
 	const { clearDiscoveryCache, discoverInstalledResourcesCached } = discoveryModule;
 	const { buildSkillList, buildSourceList, filterSkillsFromPromptByPolicy } = skillsModule;
-	const { evaluateSkillInvocationBlock, parseSkillInvocation } = enforcementModule;
+	const { evaluateSkillInvocationBlock, evaluateSkillInvocationBlockWithManagedSkills, parseSkillInvocation } = enforcementModule;
 	const { formatManageSkillsStatus } = commandsModule;
 
 	const sourceRoot = path.join(tmp, "custom-skills");
@@ -123,14 +123,38 @@ try {
 	assert.equal(evaluateSkillInvocationBlock(pi, policy, tmp, "/skill:").blocked, true, "empty skill invocation fails closed");
 	assert.equal(evaluateSkillInvocationBlock(pi, policy, tmp, "/skill:bad/name").blocked, true, "malformed skill invocation fails closed");
 
+	const folderA = path.join(tmp, "folder-a");
+	const folderB = path.join(tmp, "folder-b");
+	mkdirSync(folderA, { recursive: true });
+	mkdirSync(folderB, { recursive: true });
+	state = defaultState();
+	setFolderSkillPolicy(state.skillPolicy, folderA, { name: "alpha", path: alpha, sourceRoot }, "disabled");
+	await writeState(state);
+	clearDiscoveryCache();
+	const folderAResources = await discoverInstalledResourcesCached(folderA);
+	const folderBResources = await discoverInstalledResourcesCached(folderB);
+	assert.ok(!folderAResources.skillPaths.includes(alpha), "folder A disable omits manager-owned skill in folder A discovery");
+	assert.ok(folderBResources.skillPaths.includes(alpha), "folder A disable does not omit manager-owned skill in folder B discovery");
+	const folderASkills = await buildSkillList(inventoryPi, [], [alpha, beta], state.skillPolicy, folderA, [sourceRoot]);
+	const folderBSkills = await buildSkillList(inventoryPi, [], [alpha, beta], state.skillPolicy, folderB, [sourceRoot]);
+	assert.equal(folderASkills.find((skill) => skill.path === alpha)?.enabled, false, "folder A status shows alpha disabled");
+	assert.equal(folderBSkills.find((skill) => skill.path === alpha)?.enabled, true, "folder B status keeps alpha enabled");
+	const externalAlpha = skillFile(path.join(tmp, "external-alpha"), "alpha", "alpha");
+	const mixedDuplicatePi = { getCommands: () => [
+		{ source: "skill", name: "skill:alpha", sourceInfo: { path: externalAlpha }, description: "external enabled duplicate" },
+	] };
+	assert.equal((await evaluateSkillInvocationBlockWithManagedSkills(mixedDuplicatePi, state.skillPolicy, folderA, "/skill:alpha", [sourceRoot], [alpha, beta])).blocked, true, "pathful enabled duplicate is blocked when a manager-owned same-name skill is disabled but omitted from discovery");
+	assert.equal((await evaluateSkillInvocationBlockWithManagedSkills(mixedDuplicatePi, state.skillPolicy, folderB, "/skill:alpha", [sourceRoot], [alpha, beta])).blocked, false, "same mixed duplicate remains allowed outside the disabled folder");
+
 	const registeredCommands = new Map();
 	const registeredEvents = new Map();
+	const emittedMessages = [];
 	const extensionPi = {
 		registerMessageRenderer() {},
 		registerCommand(name, options) { registeredCommands.set(name, options); },
 		on(name, handler) { registeredEvents.set(name, handler); },
 		getCommands: () => [],
-		sendMessage() {},
+		sendMessage(message) { emittedMessages.push(message); },
 	};
 	extensionFactory(extensionPi);
 	assert.ok(registeredCommands.has("manage-skills"), "/manage-skills is registered");
@@ -139,6 +163,22 @@ try {
 	assert.ok(completionValues.includes("status"), "/manage-skills autocomplete exposes status");
 	assert.ok(!completionValues.includes("sources"), "old /skills sources autocomplete is not exposed");
 	assert.ok(registeredEvents.has("input"), "input interception hook registered before skill expansion path");
+	assert.ok(registeredEvents.has("before_agent_start"), "before_agent_start prompt filtering hook registered");
+
+	const folderPrompt = `<skill>\n<name>alpha</name>\n<location>${alpha}</location>\n</skill>\n<skill>\n<name>beta</name>\n<location>${beta}</location>\n</skill>`;
+	const beforeAgentStart = registeredEvents.get("before_agent_start");
+	const promptResultA = await beforeAgentStart({ systemPrompt: folderPrompt, systemPromptOptions: { cwd: folderA }, cwd: folderB }, { cwd: folderB });
+	assert.equal(promptResultA.systemPrompt.includes("<name>alpha</name>"), false, "before_agent_start filters using systemPromptOptions.cwd instead of stale top-level cwd");
+	assert.equal(promptResultA.systemPrompt.includes("<name>beta</name>"), true, "before_agent_start keeps enabled folder skill");
+	const promptResultB = await beforeAgentStart({ systemPrompt: folderPrompt, systemPromptOptions: { cwd: folderB }, cwd: folderA }, { cwd: folderA });
+	assert.equal(promptResultB, undefined, "before_agent_start does not filter another folder without the folder rule");
+
+	const inputHandler = registeredEvents.get("input");
+	let inputResult = await inputHandler({ text: "/skill:alpha" }, { cwd: folderA, hasUI: true });
+	assert.equal(inputResult.action, "handled", "manager-owned disabled skill is blocked in disabled folder even when command discovery has no path");
+	assert.match(emittedMessages.at(-1)?.content ?? "", /Blocked \/skill invocation/);
+	inputResult = await inputHandler({ text: "/skill:alpha" }, { cwd: folderB, hasUI: true });
+	assert.equal(inputResult.action, "continue", "manager-owned folder disable does not block explicit /skill in another folder");
 
 	console.log("manage skills enforcement tests ok");
 } finally {

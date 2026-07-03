@@ -1,8 +1,9 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import path from "node:path";
 import { evaluateSkillPolicy } from "./skill-policy.js";
 import type { SkillPolicy } from "./types.js";
 import { normalizePath } from "./utils.js";
-import { sourceRootForSkillPath } from "./skills.js";
+import { readSkillInfo, sourceRootForSkillPath } from "./skills.js";
 
 export type ParsedSkillInvocation =
 	| { kind: "not-skill" }
@@ -14,6 +15,11 @@ export type SkillInvocationBlock = {
 	name?: string;
 	reason?: string;
 	matchedPaths?: string[];
+};
+
+type SkillInvocationMatch = {
+	path?: string;
+	sourceRoot?: string;
 };
 
 const SKILL_PREFIX = "/skill:";
@@ -29,13 +35,8 @@ export function parseSkillInvocation(text: string): ParsedSkillInvocation {
 	return { kind: "skill", name: token };
 }
 
-export function evaluateSkillInvocationBlock(pi: ExtensionAPI, policy: SkillPolicy, cwd: string | undefined, text: string, customSourceRoots: string[] = []): SkillInvocationBlock {
-	const parsed = parseSkillInvocation(text);
-	if (parsed.kind === "not-skill") return { blocked: false };
-	if (parsed.kind === "malformed") return { blocked: true, reason: parsed.reason };
-
-	const name = parsed.name;
-	const commandMatches = pi.getCommands()
+function commandMatchesForName(pi: ExtensionAPI, name: string, cwd: string | undefined, customSourceRoots: string[]): SkillInvocationMatch[] {
+	return pi.getCommands()
 		.filter((cmd) => cmd.source === "skill" && cmd.name.replace(/^skill:/, "") === name)
 		.map((cmd) => {
 			const rawPath = cmd.sourceInfo?.path;
@@ -43,17 +44,74 @@ export function evaluateSkillInvocationBlock(pi: ExtensionAPI, policy: SkillPoli
 			const sourceRoot = skillPath ? sourceRootForSkillPath(skillPath, { cwd, customSourceRoots }).sourceRoot : undefined;
 			return { path: skillPath, sourceRoot };
 		});
+}
 
-	const disabledMatches = commandMatches.filter((match) => !evaluateSkillPolicy(policy, { name, path: match.path, sourceRoot: match.sourceRoot }, cwd).enabled);
+function blockFromMatches(policy: SkillPolicy, cwd: string | undefined, name: string, matches: SkillInvocationMatch[]): SkillInvocationBlock | undefined {
+	const disabledMatches = matches.filter((match) => !evaluateSkillPolicy(policy, { name, path: match.path, sourceRoot: match.sourceRoot }, cwd).enabled);
 	if (disabledMatches.length > 0) {
 		return {
 			blocked: true,
 			name,
 			reason: `Skill is disabled by policy: ${name}`,
-			matchedPaths: disabledMatches.map((match) => match.path).filter((path): path is string => Boolean(path)),
+			matchedPaths: disabledMatches.map((match) => match.path).filter((matchPath): matchPath is string => Boolean(matchPath)),
 		};
 	}
-	if (commandMatches.length > 0) return { blocked: false, name };
+	if (matches.length > 0) return { blocked: false, name };
+	return undefined;
+}
+
+async function managedSkillMatchesForName(name: string, cwd: string | undefined, customSourceRoots: string[], managedSkillPaths: string[]): Promise<SkillInvocationMatch[]> {
+	const matches: SkillInvocationMatch[] = [];
+	for (const skillPath of managedSkillPaths) {
+		const normalizedSkillPath = normalizePath(skillPath);
+		const info = await readSkillInfo(normalizedSkillPath);
+		const skillName = info?.name || path.basename(path.dirname(normalizedSkillPath));
+		if (skillName !== name) continue;
+		const sourceRoot = sourceRootForSkillPath(normalizedSkillPath, { cwd, customSourceRoots }).sourceRoot;
+		matches.push({ path: normalizedSkillPath, sourceRoot });
+	}
+	return matches;
+}
+
+export function evaluateSkillInvocationBlock(pi: ExtensionAPI, policy: SkillPolicy, cwd: string | undefined, text: string, customSourceRoots: string[] = []): SkillInvocationBlock {
+	const parsed = parseSkillInvocation(text);
+	if (parsed.kind === "not-skill") return { blocked: false };
+	if (parsed.kind === "malformed") return { blocked: true, reason: parsed.reason };
+
+	const name = parsed.name;
+	const commandMatches = commandMatchesForName(pi, name, cwd, customSourceRoots);
+	const commandBlock = blockFromMatches(policy, cwd, name, commandMatches);
+	if (commandBlock?.blocked) return commandBlock;
+	if (commandMatches.length > 0) return commandBlock ?? { blocked: false, name };
+
+	const nameOnly = evaluateSkillPolicy(policy, { name }, cwd);
+	if (!nameOnly.enabled) return { blocked: true, name, reason: `Skill is disabled by policy: ${name}` };
+	return { blocked: false, name };
+}
+
+export async function evaluateSkillInvocationBlockWithManagedSkills(
+	pi: ExtensionAPI,
+	policy: SkillPolicy,
+	cwd: string | undefined,
+	text: string,
+	customSourceRoots: string[] = [],
+	managedSkillPaths: string[] = [],
+): Promise<SkillInvocationBlock> {
+	const parsed = parseSkillInvocation(text);
+	if (parsed.kind === "not-skill") return { blocked: false };
+	if (parsed.kind === "malformed") return { blocked: true, reason: parsed.reason };
+
+	const name = parsed.name;
+	const commandMatches = commandMatchesForName(pi, name, cwd, customSourceRoots);
+	const commandBlock = blockFromMatches(policy, cwd, name, commandMatches);
+	if (commandBlock?.blocked) return commandBlock;
+
+	const managedMatches = await managedSkillMatchesForName(name, cwd, customSourceRoots, managedSkillPaths);
+	const managedBlock = blockFromMatches(policy, cwd, name, managedMatches);
+	if (managedBlock?.blocked) return managedBlock;
+	if (commandMatches.some((match) => match.path)) return commandBlock ?? { blocked: false, name };
+	if (managedBlock) return managedBlock;
+	if (commandMatches.length > 0) return commandBlock ?? { blocked: false, name };
 
 	const nameOnly = evaluateSkillPolicy(policy, { name }, cwd);
 	if (!nameOnly.enabled) return { blocked: true, name, reason: `Skill is disabled by policy: ${name}` };

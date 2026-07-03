@@ -3,11 +3,11 @@ import { Text } from "@earendil-works/pi-tui";
 import { syncAgentSymlinks } from "./agents.js";
 import { getManageSkillsArgumentCompletions, getPluginArgumentCompletions } from "./autocomplete.js";
 import { CUSTOM_MESSAGE_TYPE } from "./constants.js";
-import { claudePluginEntriesForCwd, clearDiscoveryCache, discoverInstalledResourcesCached, installedEntriesForCwd, piManagedKeysForCwd } from "./discovery.js";
+import { claudePluginEntriesForCwd, clearDiscoveryCache, discoverInstalledResourcesCached, discoverManagerOwnedSkillPathsForCwd, installedEntriesForCwd, piManagedKeysForCwd } from "./discovery.js";
 import { emit } from "./format.js";
 import { handleCommand, handleManageSkillsCommand } from "./commands.js";
 import { installPluginFromMarketplace } from "./installer.js";
-import { evaluateSkillInvocationBlock } from "./enforcement.js";
+import { evaluateSkillInvocationBlockWithManagedSkills } from "./enforcement.js";
 import { filterSkillsFromPromptByPolicy } from "./skills.js";
 import { readConfig, readState, writeState } from "./state.js";
 import { isUpdateCheckDue, runUpdateCheck } from "./update-check.js";
@@ -52,10 +52,11 @@ export default function claudePluginManager(pi: ExtensionAPI) {
 		return await discoverInstalledResourcesCached(event.cwd);
 	});
 
-	pi.on("before_agent_start", async (event) => {
+	pi.on("before_agent_start", async (event, ctx) => {
 		const state = await readState();
 		const config = await readConfig();
-		const filtered = filterSkillsFromPromptByPolicy(event.systemPrompt, state.skillPolicy, (event as { cwd?: string }).cwd, config.skillSources ?? []);
+		const cwd = event.systemPromptOptions?.cwd ?? ctx?.cwd;
+		const filtered = filterSkillsFromPromptByPolicy(event.systemPrompt, state.skillPolicy, cwd, config.skillSources ?? []);
 		if (filtered !== event.systemPrompt) {
 			return { systemPrompt: filtered };
 		}
@@ -66,7 +67,9 @@ export default function claudePluginManager(pi: ExtensionAPI) {
 		try {
 			const state = await readState();
 			const config = await readConfig();
-			const block = evaluateSkillInvocationBlock(pi, state.skillPolicy, ctx.cwd, event.text, config.skillSources ?? []);
+			const customSourceRoots = config.skillSources ?? [];
+			const managedSkillPaths = await discoverManagerOwnedSkillPathsForCwd(state, ctx.cwd, customSourceRoots);
+			const block = await evaluateSkillInvocationBlockWithManagedSkills(pi, state.skillPolicy, ctx.cwd, event.text, customSourceRoots, managedSkillPaths);
 			if (!block.blocked) return { action: "continue" };
 			await emit(pi, ctx, `Blocked /skill invocation. ${block.reason ?? "Skill invocation is not allowed."}`);
 			return { action: "handled" };
