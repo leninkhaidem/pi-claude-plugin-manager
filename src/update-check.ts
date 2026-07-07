@@ -289,17 +289,114 @@ function sameUpdateResult(a: UpdateCheckResult | undefined, b: UpdateCheckResult
 		a.plugin === b.plugin;
 }
 
+function renameUpdateCheckResult(key: string, result: UpdateCheckResult, renamedMarketplaces: Map<string, string>): { key: string; result: UpdateCheckResult } {
+	const marketplace = renamedMarketplaces.get(result.marketplace) ?? result.marketplace;
+	if (marketplace === result.marketplace) return { key, result };
+	return {
+		key: pluginKey(result.plugin, marketplace),
+		result: { ...result, marketplace },
+	};
+}
+
+function migratePendingUpdateResults(
+	pendingResults: Record<string, UpdateCheckResult>,
+	renamedMarketplaces: Map<string, string>,
+): Record<string, UpdateCheckResult> {
+	const migrated: Record<string, UpdateCheckResult> = {};
+	for (const [key, result] of Object.entries(pendingResults)) {
+		const renamed = renameUpdateCheckResult(key, result, renamedMarketplaces);
+		migrated[renamed.key] = renamed.result;
+	}
+	return migrated;
+}
+
 function computePendingResults(
 	latestState: State,
 	detectedUpdates: Record<string, UpdateCheckResult>,
 	failedKeys: Set<string>,
+	renamedMarketplaces: Map<string, string>,
 ): Record<string, UpdateCheckResult> {
-	const pending: Record<string, UpdateCheckResult> = { ...(latestState.lastUpdateCheckResults ?? {}) };
+	const pending = migratePendingUpdateResults(latestState.lastUpdateCheckResults ?? {}, renamedMarketplaces);
 	for (const [key, result] of Object.entries(detectedUpdates)) {
-		if (failedKeys.has(key)) pending[key] = result;
-		else if (!pending[key] || sameUpdateResult(pending[key], result)) delete pending[key];
+		const renamed = renameUpdateCheckResult(key, result, renamedMarketplaces);
+		if (failedKeys.has(key)) pending[renamed.key] = renamed.result;
+		else if (!pending[renamed.key] || sameUpdateResult(pending[renamed.key], renamed.result)) delete pending[renamed.key];
+		if (renamed.key !== key) delete pending[key];
 	}
 	return pending;
+}
+
+function entryIsFromMarketplace(entry: InstalledPluginEntry, marketplace: string): boolean {
+	return entry.marketplace === marketplace;
+}
+
+function migrateRenamedMarketplacePluginState(state: State, renamedMarketplaces: Map<string, string>): TargetedUpdateInstallFailure[] {
+	const conflicts: TargetedUpdateInstallFailure[] = [];
+	const migrations: Array<{
+		currentKey: string;
+		oldKey: string;
+		newKey: string;
+		oldMarketplace: string;
+		entry: InstalledPluginEntry;
+		migratedEntry: InstalledPluginEntry;
+	}> = [];
+
+	for (const [oldMarketplace, newMarketplace] of renamedMarketplaces) {
+		if (oldMarketplace === newMarketplace) continue;
+		for (const [currentKey, entries] of Object.entries(state.plugins)) {
+			for (const entry of entries) {
+				if (!entryIsFromMarketplace(entry, oldMarketplace)) continue;
+				const oldKey = pluginKey(entry.plugin, oldMarketplace);
+				const newKey = pluginKey(entry.plugin, newMarketplace);
+				const migratedEntry: InstalledPluginEntry = { ...entry, marketplace: newMarketplace };
+				const existingTarget = (state.plugins[newKey] ?? []).find((candidate) => sameEntryIdentity(candidate, migratedEntry));
+				if (existingTarget) {
+					conflicts.push({
+						key: oldKey,
+						oldKey,
+						newKey,
+						marketplace: oldMarketplace,
+						plugin: entry.plugin,
+						scope: entry.scope,
+						projectPath: entry.projectPath,
+						reason: `Marketplace rename conflict: ${oldKey} cannot be migrated to ${newKey} because the target entry already exists`,
+					});
+					continue;
+				}
+				migrations.push({ currentKey, oldKey, newKey, oldMarketplace, entry, migratedEntry });
+			}
+		}
+	}
+
+	if (conflicts.length > 0) return conflicts;
+
+	for (const migration of migrations) {
+		const hadOldEnabledState = Object.prototype.hasOwnProperty.call(state.enabledPlugins, migration.oldKey);
+		const oldEnabledState = state.enabledPlugins[migration.oldKey];
+		const currentEntries = state.plugins[migration.currentKey] ?? [];
+		const remaining = currentEntries.filter((candidate) =>
+			!(sameEntryIdentity(candidate, migration.entry) && candidate.plugin === migration.entry.plugin && candidate.marketplace === migration.oldMarketplace),
+		);
+		if (remaining.length > 0) state.plugins[migration.currentKey] = remaining;
+		else {
+			delete state.plugins[migration.currentKey];
+			delete state.enabledPlugins[migration.currentKey];
+		}
+
+		if (hadOldEnabledState && !Object.prototype.hasOwnProperty.call(state.enabledPlugins, migration.newKey)) {
+			state.enabledPlugins[migration.newKey] = oldEnabledState!;
+		}
+		state.plugins[migration.newKey] = replaceEntry(state.plugins[migration.newKey] ?? [], migration.migratedEntry);
+	}
+
+	for (const migration of migrations) {
+		if (!state.plugins[migration.oldKey] || state.plugins[migration.oldKey].length === 0) {
+			delete state.plugins[migration.oldKey];
+			delete state.enabledPlugins[migration.oldKey];
+		}
+	}
+
+	return [];
 }
 
 function mergeSuccessfulApplications(
@@ -482,6 +579,7 @@ export async function installDetectedPluginUpdates(detectedUpdates: Record<strin
 
 	const latestState = await readState();
 	const { merged, conflicts } = mergeSuccessfulApplications(baseState, latestState, workingState, successfulApplications, marketplaceRenames);
+	conflicts.push(...migrateRenamedMarketplacePluginState(merged, marketplaceRenames));
 	for (const conflict of conflicts) {
 		const conflictKeys = conflict.plugin === "*"
 			? Object.entries(detectedUpdates).filter(([, update]) => update.marketplace === conflict.marketplace).map(([detectedKey]) => detectedKey)
@@ -493,7 +591,7 @@ export async function installDetectedPluginUpdates(detectedUpdates: Record<strin
 		}
 	}
 
-	const pendingResults = computePendingResults(latestState, detectedUpdates, failedKeys);
+	const pendingResults = computePendingResults(latestState, detectedUpdates, failedKeys, marketplaceRenames);
 	merged.lastUpdateCheckAt = latestState.lastUpdateCheckAt;
 	if (Object.keys(pendingResults).length > 0) merged.lastUpdateCheckResults = pendingResults;
 	else delete merged.lastUpdateCheckResults;

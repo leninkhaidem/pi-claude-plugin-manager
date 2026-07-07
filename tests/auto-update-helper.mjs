@@ -28,18 +28,21 @@ async function writePlugin(repoPath, name, version) {
 
 async function writeMarketplace(repoPath, versions, options = {}) {
 	await mkdir(path.join(repoPath, ".claude-plugin"), { recursive: true });
-	const plugins = [
-		{ name: "demo", version: versions.demo, source: "plugins/demo", description: "Demo plugin" },
-		{ name: "bad", version: versions.bad, source: options.badMissing ? "plugins/missing" : "plugins/bad", description: "Bad plugin" },
-		{ name: "other", version: versions.other, source: "plugins/other", description: "Other plugin" },
-	];
+	const marketplaceName = options.marketplaceName ?? "fixture-marketplace";
+	const missingPlugins = new Set(options.missingPlugins ?? (options.badMissing ? ["bad"] : []));
+	const plugins = ["demo", "bad", "other"].map((name) => ({
+		name,
+		version: versions[name],
+		source: missingPlugins.has(name) ? `plugins/missing-${name}` : `plugins/${name}`,
+		description: `${name[0].toUpperCase()}${name.slice(1)} plugin`,
+	}));
 	await writeFile(
 		path.join(repoPath, ".claude-plugin/marketplace.json"),
-		`${JSON.stringify({ name: "fixture-marketplace", description: "Fixture marketplace", plugins }, null, 2)}\n`,
+		`${JSON.stringify({ name: marketplaceName, description: "Fixture marketplace", plugins }, null, 2)}\n`,
 	);
-	await writePlugin(repoPath, "demo", versions.demo);
-	if (!options.badMissing) await writePlugin(repoPath, "bad", versions.bad);
-	await writePlugin(repoPath, "other", versions.other);
+	for (const name of ["demo", "bad", "other"]) {
+		if (!missingPlugins.has(name)) await writePlugin(repoPath, name, versions[name]);
+	}
 }
 
 function assert(condition, message) {
@@ -51,7 +54,7 @@ function versionsFor(state, key) {
 }
 
 function assertNoInstallTemps(agentDir) {
-	const cache = path.join(agentDir, "claude-plugin-manager/cache/fixture-marketplace");
+	const cache = path.join(agentDir, "claude-plugin-manager/cache");
 	if (!existsSync(cache)) return;
 	const stack = [cache];
 	while (stack.length > 0) {
@@ -61,6 +64,48 @@ function assertNoInstallTemps(agentDir) {
 			if (name.isDirectory()) stack.push(path.join(dir, name.name));
 		}
 	}
+}
+
+function assertNoMarketplaceReferences(state, marketplace) {
+	assert(!state.marketplaces[marketplace], `stale marketplace record remained for ${marketplace}`);
+	for (const key of Object.keys(state.plugins)) {
+		assert(!key.endsWith(`@${marketplace}`), `stale plugin key remained: ${key}`);
+	}
+	for (const entries of Object.values(state.plugins)) {
+		for (const entry of entries) assert(entry.marketplace !== marketplace, `stale plugin entry marketplace remained: ${JSON.stringify(entry)}`);
+	}
+	for (const [key, result] of Object.entries(state.lastUpdateCheckResults ?? {})) {
+		assert(!key.endsWith(`@${marketplace}`), `stale pending result key remained: ${key}`);
+		assert(result.marketplace !== marketplace, `stale pending result marketplace remained: ${JSON.stringify(result)}`);
+	}
+}
+
+async function createRenameFixture(root, marketplaceName) {
+	const remoteWork = path.join(root, "remote-work");
+	const remoteBare = path.join(root, "remote.git");
+	const cacheCheckout = path.join(root, "cache-checkout");
+	await mkdir(remoteWork, { recursive: true });
+	git(remoteWork, ["init", "-b", "main"]);
+	await writeMarketplace(remoteWork, { demo: "1.0.0", bad: "1.0.0", other: "1.0.0" }, { marketplaceName });
+	git(remoteWork, ["add", "."]);
+	git(remoteWork, ["commit", "-m", "initial marketplace"]);
+	git(root, ["clone", "--bare", remoteWork, remoteBare]);
+	git(root, ["clone", remoteBare, cacheCheckout]);
+	git(remoteWork, ["remote", "add", "origin", remoteBare]);
+
+	const state = defaultState();
+	state.marketplaces[marketplaceName] = {
+		name: marketplaceName,
+		description: "Fixture marketplace",
+		source: { kind: "git", input: marketplaceName, url: remoteBare },
+		path: cacheCheckout,
+		addedAt: new Date(0).toISOString(),
+		updatedAt: new Date(0).toISOString(),
+	};
+	await installPluginFromMarketplace(state, `demo@${marketplaceName}`, "user", root);
+	await installPluginFromMarketplace(state, `bad@${marketplaceName}`, "user", root);
+	await writeState(state);
+	return { remoteWork, remoteBare, cacheCheckout };
 }
 
 const tmp = await mkdtemp(path.join(os.tmpdir(), "pi-auto-update-helper-"));
@@ -161,6 +206,99 @@ try {
 	assert(!updatedState.lastUpdateCheckResults || Object.keys(updatedState.lastUpdateCheckResults).length === 0, "all-success helper run should clear pending results");
 	assert(versionsFor(updatedState, "bad@fixture-marketplace").every((entry) => entry.version === "1.2.0"), "bad should update after source is repaired");
 	assert(versionsFor(updatedState, "other@fixture-marketplace").every((entry) => entry.version === "1.1.0"), "other should update when explicitly pending");
+	assertNoInstallTemps(agentDir);
+
+	const partialRenameRoot = path.join(tmp, "rename-partial");
+	await mkdir(partialRenameRoot, { recursive: true });
+	await writeState(defaultState());
+	const partialOldMarketplace = "rename-partial-old";
+	const partialNewMarketplace = "rename-partial-new";
+	const partialFixture = await createRenameFixture(partialRenameRoot, partialOldMarketplace);
+	await writeMarketplace(
+		partialFixture.remoteWork,
+		{ demo: "1.1.0", bad: "1.1.0", other: "1.0.0" },
+		{ marketplaceName: partialNewMarketplace, missingPlugins: ["bad"] },
+	);
+	git(partialFixture.remoteWork, ["add", "."]);
+	git(partialFixture.remoteWork, ["commit", "-m", "rename with partial failure"]);
+	git(partialFixture.remoteWork, ["push", "origin", "main"]);
+
+	const partialDetected = await runUpdateCheck(await readState(), true);
+	const partialDetectedDemoKey = `demo@${partialOldMarketplace}`;
+	const partialDetectedBadKey = `bad@${partialOldMarketplace}`;
+	assert(partialDetected[partialDetectedDemoKey], "rename partial check did not detect demo update under old key");
+	assert(partialDetected[partialDetectedBadKey], "rename partial check did not detect bad update under old key");
+	const partialRename = await installDetectedPluginUpdates({
+		[partialDetectedDemoKey]: partialDetected[partialDetectedDemoKey],
+		[partialDetectedBadKey]: partialDetected[partialDetectedBadKey],
+	}, { cwd: partialRenameRoot });
+	assert(partialRename.marketplaceRenames[partialOldMarketplace] === partialNewMarketplace, `expected partial rename map: ${JSON.stringify(partialRename.marketplaceRenames)}`);
+	assert(partialRename.successfulEntries === 1, `expected one successful renamed install: ${JSON.stringify(partialRename)}`);
+	assert(partialRename.failures.length === 1 && partialRename.failures[0].newKey === `bad@${partialNewMarketplace}`, `expected renamed bad failure: ${JSON.stringify(partialRename.failures)}`);
+	updatedState = await readState();
+	assert(updatedState.marketplaces[partialNewMarketplace], "renamed marketplace record was not persisted after partial rename");
+	assertNoMarketplaceReferences(updatedState, partialOldMarketplace);
+	assert(versionsFor(updatedState, `demo@${partialNewMarketplace}`).every((entry) => entry.version === "1.1.0"), "renamed demo success was not stored under new key");
+	assert(versionsFor(updatedState, `bad@${partialNewMarketplace}`).every((entry) => entry.version === "1.0.0"), "renamed failed bad entry should keep previous version under new key");
+	assert(updatedState.enabledPlugins[`bad@${partialNewMarketplace}`] === true, "renamed failed bad enabled state was not migrated");
+	assert(updatedState.lastUpdateCheckResults?.[`bad@${partialNewMarketplace}`], "renamed failed bad pending result was not migrated to new key");
+	assert(updatedState.lastUpdateCheckResults[`bad@${partialNewMarketplace}`].marketplace === partialNewMarketplace, "renamed failed bad pending result kept old marketplace");
+
+	await writeMarketplace(partialFixture.remoteWork, { demo: "1.1.0", bad: "1.2.0", other: "1.0.0" }, { marketplaceName: partialNewMarketplace });
+	git(partialFixture.remoteWork, ["add", "."]);
+	git(partialFixture.remoteWork, ["commit", "-m", "repair renamed partial failure"]);
+	git(partialFixture.remoteWork, ["push", "origin", "main"]);
+	const partialRetry = await installDetectedPluginUpdates((await readState()).lastUpdateCheckResults, { cwd: partialRenameRoot });
+	assert(partialRetry.failures.length === 0, `renamed partial retry should proceed without failures: ${JSON.stringify(partialRetry.failures)}`);
+	assert(partialRetry.successfulEntries === 1, `renamed partial retry should update one entry: ${JSON.stringify(partialRetry)}`);
+	updatedState = await readState();
+	assert(!updatedState.lastUpdateCheckResults || Object.keys(updatedState.lastUpdateCheckResults).length === 0, "renamed partial retry should clear pending results");
+	assert(versionsFor(updatedState, `bad@${partialNewMarketplace}`).every((entry) => entry.version === "1.2.0"), "renamed bad retry did not install repaired version");
+	assertNoInstallTemps(agentDir);
+
+	const completeRenameRoot = path.join(tmp, "rename-complete");
+	await mkdir(completeRenameRoot, { recursive: true });
+	await writeState(defaultState());
+	const completeOldMarketplace = "rename-complete-old";
+	const completeNewMarketplace = "rename-complete-new";
+	const completeFixture = await createRenameFixture(completeRenameRoot, completeOldMarketplace);
+	await writeMarketplace(
+		completeFixture.remoteWork,
+		{ demo: "1.1.0", bad: "1.1.0", other: "1.0.0" },
+		{ marketplaceName: completeNewMarketplace, missingPlugins: ["demo", "bad"] },
+	);
+	git(completeFixture.remoteWork, ["add", "."]);
+	git(completeFixture.remoteWork, ["commit", "-m", "rename with complete failure"]);
+	git(completeFixture.remoteWork, ["push", "origin", "main"]);
+
+	const completeDetected = await runUpdateCheck(await readState(), true);
+	const completeDetectedDemoKey = `demo@${completeOldMarketplace}`;
+	const completeDetectedBadKey = `bad@${completeOldMarketplace}`;
+	assert(completeDetected[completeDetectedDemoKey], "rename complete check did not detect demo update under old key");
+	assert(completeDetected[completeDetectedBadKey], "rename complete check did not detect bad update under old key");
+	const completeRename = await installDetectedPluginUpdates(completeDetected, { cwd: completeRenameRoot });
+	assert(completeRename.marketplaceRenames[completeOldMarketplace] === completeNewMarketplace, `expected complete rename map: ${JSON.stringify(completeRename.marketplaceRenames)}`);
+	assert(completeRename.successfulEntries === 0, `expected no successful entries for complete failure: ${JSON.stringify(completeRename)}`);
+	assert(completeRename.failures.length === 2, `expected two failures for complete rename failure: ${JSON.stringify(completeRename.failures)}`);
+	updatedState = await readState();
+	assert(updatedState.marketplaces[completeNewMarketplace], "renamed marketplace record was not persisted after complete failure");
+	assertNoMarketplaceReferences(updatedState, completeOldMarketplace);
+	assert(versionsFor(updatedState, `demo@${completeNewMarketplace}`).every((entry) => entry.version === "1.0.0"), "renamed failed demo entry should keep previous version under new key");
+	assert(versionsFor(updatedState, `bad@${completeNewMarketplace}`).every((entry) => entry.version === "1.0.0"), "renamed failed bad entry should keep previous version under new key");
+	assert(updatedState.lastUpdateCheckResults?.[`demo@${completeNewMarketplace}`]?.marketplace === completeNewMarketplace, "renamed complete demo pending result was not migrated");
+	assert(updatedState.lastUpdateCheckResults?.[`bad@${completeNewMarketplace}`]?.marketplace === completeNewMarketplace, "renamed complete bad pending result was not migrated");
+
+	await writeMarketplace(completeFixture.remoteWork, { demo: "1.2.0", bad: "1.2.0", other: "1.0.0" }, { marketplaceName: completeNewMarketplace });
+	git(completeFixture.remoteWork, ["add", "."]);
+	git(completeFixture.remoteWork, ["commit", "-m", "repair renamed complete failure"]);
+	git(completeFixture.remoteWork, ["push", "origin", "main"]);
+	const completeRetry = await installDetectedPluginUpdates((await readState()).lastUpdateCheckResults, { cwd: completeRenameRoot });
+	assert(completeRetry.failures.length === 0, `renamed complete retry should proceed without failures: ${JSON.stringify(completeRetry.failures)}`);
+	assert(completeRetry.successfulEntries === 2, `renamed complete retry should update both entries: ${JSON.stringify(completeRetry)}`);
+	updatedState = await readState();
+	assert(!updatedState.lastUpdateCheckResults || Object.keys(updatedState.lastUpdateCheckResults).length === 0, "renamed complete retry should clear pending results");
+	assert(versionsFor(updatedState, `demo@${completeNewMarketplace}`).every((entry) => entry.version === "1.2.0"), "renamed complete demo retry did not install repaired version");
+	assert(versionsFor(updatedState, `bad@${completeNewMarketplace}`).every((entry) => entry.version === "1.2.0"), "renamed complete bad retry did not install repaired version");
 	assertNoInstallTemps(agentDir);
 
 	console.log("auto update helper tests ok");
