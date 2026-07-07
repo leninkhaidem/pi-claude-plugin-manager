@@ -163,6 +163,24 @@ export async function refreshMarketplace(record: MarketplaceRecord): Promise<Mar
 	};
 }
 
+export async function refreshMarketplaceRecords(state: State, marketplaceNames?: string[]): Promise<Map<string, string>> {
+	const targets = marketplaceNames
+		? [...new Set(marketplaceNames)].map((name) => {
+			const record = state.marketplaces[name];
+			if (!record) throw new Error(`Unknown marketplace: ${name}`);
+			return record;
+		})
+		: Object.values(state.marketplaces);
+	const renamed = new Map<string, string>();
+	for (const target of targets) {
+		const refreshed = await refreshMarketplace(target);
+		delete state.marketplaces[target.name];
+		state.marketplaces[refreshed.name] = refreshed;
+		renamed.set(target.name, refreshed.name);
+	}
+	return renamed;
+}
+
 export async function loadMarketplace(record: MarketplaceRecord): Promise<MarketplaceFile> {
 	const { marketplace } = await readMarketplaceAt(record.path);
 	return marketplace;

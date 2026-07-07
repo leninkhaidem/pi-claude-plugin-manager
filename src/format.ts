@@ -54,6 +54,10 @@ Changes in the source directory are picked up on /reload — no reinstall needed
 **Automatic**: when a marketplace was added via a local path, plugins install in dev mode by default.
 Dev plugins are skipped during /plugin update and update checks.
 
+## Update checks
+Startup update checks support updateCheckOnStartup values: auto (default), notify, prompt, or off.
+Use /plugin check-updates to review detected updates manually; /plugin update remains the explicit install command.
+
 ## GitHub Enterprise
 Use a full public Git URL or host shorthand, for example:
 /plugin marketplace add https://github.enterprise.example.com/org/plugins.git

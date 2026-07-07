@@ -141,8 +141,8 @@ export default function claudePluginManager(pi: ExtensionAPI) {
 						const updateCount = Object.keys(results).length;
 						if (updateCount === 0) return;
 
-						const mode = config.updateCheckOnStartup ?? "notify";
-						if (mode === "notify") {
+						const mode = config.updateCheckOnStartup ?? "auto";
+						if (mode === "notify" || mode === "auto") {
 							ctx.ui.notify(
 								`[plugin] ${updateCount} plugin update${updateCount === 1 ? "" : "s"} available. Run /plugin check-updates to review.`,
 								"info",

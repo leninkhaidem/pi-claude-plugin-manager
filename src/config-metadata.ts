@@ -45,8 +45,8 @@ export const CONFIG_FIELDS: ConfigField[] = [
 	},
 	{
 		key: "updateCheckOnStartup",
-		description: "Startup behavior: notify (non-blocking), prompt (interactive), or off",
-		values: ["notify", "prompt", "off"],
+		description: "Startup behavior: auto (default install), notify (check only), prompt (interactive), or off",
+		values: ["auto", "notify", "prompt", "off"],
 	},
 ];
 

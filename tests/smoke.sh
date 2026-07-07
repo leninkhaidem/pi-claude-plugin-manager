@@ -133,6 +133,10 @@ run_pi() {
 }
 
 run_pi "/plugin config set claudeReadOnlyImports false" >/dev/null
+for MODE in auto notify prompt off; do
+  run_pi "/plugin config set updateCheckOnStartup $MODE" | grep -q "updateCheckOnStartup: $MODE"
+done
+run_pi "/plugin config reset updateCheckOnStartup" | grep -q "updateCheckOnStartup: auto"
 run_pi "/plugin help" | grep -q "/plugin browse \[marketplace\]"
 run_pi "/manage-skills help" | grep -q "/manage-skills status"
 run_pi "/plugin marketplace add $MARKETPLACE" | grep -q "Added marketplace fixture-marketplace"
@@ -207,6 +211,8 @@ JITI_FS_CACHE="$TMP/jiti-cache" PI_CODING_AGENT_DIR="$AGENT" node --import "$JIT
 JITI_FS_CACHE="$TMP/jiti-cache" PI_CODING_AGENT_DIR="$AGENT" node --import "$JITI_REGISTER" "$ROOT/tests/autocomplete-smoke.mjs" | grep -q "autocomplete smoke ok"
 JITI_FS_CACHE="$TMP/jiti-cache" PI_CODING_AGENT_DIR="$AGENT" node --import "$JITI_REGISTER" "$ROOT/tests/marketplace-refresh-diverged.mjs" | grep -q "marketplace refresh diverged smoke ok"
 JITI_FS_CACHE="$TMP/jiti-cache" node --import "$JITI_REGISTER" "$ROOT/tests/update-version-reporting.mjs" | grep -q "update version reporting smoke ok"
+JITI_FS_CACHE="$TMP/jiti-cache" node --import "$JITI_REGISTER" "$ROOT/tests/config-auto-mode.mjs" | grep -q "config auto mode tests ok"
+JITI_FS_CACHE="$TMP/jiti-cache" node --import "$JITI_REGISTER" "$ROOT/tests/auto-update-helper.mjs" | grep -q "auto update helper tests ok"
 JITI_FS_CACHE="$TMP/jiti-cache" node --import "$JITI_REGISTER" "$ROOT/tests/skill-policy.mjs" | grep -q "skill policy tests ok"
 JITI_FS_CACHE="$TMP/jiti-cache" node --import "$JITI_REGISTER" "$ROOT/tests/manage-skills-enforcement.mjs" | grep -q "manage skills enforcement tests ok"
 JITI_FS_CACHE="$TMP/jiti-cache" node --import "$JITI_REGISTER" "$ROOT/tests/manage-skills-tui.mjs" | grep -q "manage skills tui tests ok"

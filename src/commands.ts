@@ -1,26 +1,22 @@
 import { syncAgentSymlinks } from "./agents.js";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { clearAutocompleteCache, PLUGIN_BROWSE_SELECT_LIMIT } from "./autocomplete.js";
+import { PLUGIN_BROWSE_SELECT_LIMIT } from "./autocomplete.js";
 import { CONFIG_FIELDS, isConfigKey } from "./config-metadata.js";
-import { clearDiscoveryCache, discoverInstalledResourcesCached } from "./discovery.js";
+import { discoverInstalledResourcesCached } from "./discovery.js";
 import { confirmInstall, emit, formatBrowseList, formatHelp, formatMarketplaceList, formatPluginList } from "./format.js";
 import { installPluginFromMarketplace, uninstallPlugin } from "./installer.js";
-import { addMarketplace, findMarketplacePlugin, listMarketplacePlugins, refreshMarketplace } from "./marketplace.js";
+import { addMarketplace, findMarketplacePlugin, listMarketplacePlugins, refreshMarketplaceRecords } from "./marketplace.js";
 import { buildSkillList, buildSourceList, discoverSkillsFromSources, type SkillInfo, type SkillSourceInfo } from "./skills.js";
 import { CheckboxSelector, type CheckboxItem, type CheckboxResult } from "./checkbox.js";
 import { createManageSkillsTui, type ManageSkillsTuiResult } from "./manage-skills-tui.js";
 import { formatUpdateCheckResults, runUpdateCheck } from "./update-check.js";
 import { defaultConfig, formatConfig, readConfig, readState, writeConfig, writeState } from "./state.js";
-import type { CommandResult, InstalledPluginEntry, MarketplacePluginListing, ManagerConfig, Scope, State } from "./types.js";
+import { clearRuntimeCaches } from "./runtime-cache.js";
+import type { CommandResult, InstalledPluginEntry, MarketplacePluginListing, ManagerConfig, Scope, State, UpdateCheckStartupMode } from "./types.js";
 import { hasFlag, parsePluginSpec, pluginKey, splitArgs, withoutFlags } from "./utils.js";
 import { rm } from "node:fs/promises";
 import { collectResourcesFromPluginRoot, readPluginManifest } from "./resources.js";
 import { claudePluginEntriesForCwd, installedEntriesForCwd, piManagedKeysForCwd } from "./discovery.js";
-
-function clearRuntimeCaches(): void {
-	clearDiscoveryCache();
-	clearAutocompleteCache();
-}
 
 async function runCheckboxSelector(ctx: ExtensionCommandContext, title: string, items: CheckboxItem[]): Promise<CheckboxResult | undefined> {
 	if (!ctx.hasUI) return undefined;
@@ -74,7 +70,7 @@ async function handleConfigCommand(pi: ExtensionAPI, args: string[], ctx: Extens
 		const key = args[1] as keyof ManagerConfig | undefined;
 		const rawValue = args.slice(2).join(" ");
 		if (!key || !isConfigKey(key) || rawValue === "") {
-			throw new Error("Usage: /plugin config set <claudeReadOnlyImports|claudeDir|claudePluginsDir|claudeSettingsPath|claudeInstalledPluginsPath> <value>");
+			throw new Error(`Usage: /plugin config set <${CONFIG_FIELDS.map((field) => field.key).join("|")}> <value>`);
 		}
 		const config = await readConfig();
 		if (key === "claudeReadOnlyImports" || key === "updateCheckEnabled") {
@@ -89,10 +85,10 @@ async function handleConfigCommand(pi: ExtensionAPI, args: string[], ctx: Extens
 			config[key] = parsed;
 		} else if (key === "updateCheckOnStartup") {
 			const normalized = rawValue.toLowerCase();
-			if (!["notify", "prompt", "off"].includes(normalized)) {
-				throw new Error("updateCheckOnStartup must be: notify, prompt, or off");
+			if (!["auto", "notify", "prompt", "off"].includes(normalized)) {
+				throw new Error("updateCheckOnStartup must be: auto, notify, prompt, or off");
 			}
-			config[key] = normalized as "notify" | "prompt" | "off";
+			config[key] = normalized as UpdateCheckStartupMode;
 		} else if (key === "skillSources") {
 			await emit(pi, ctx, "Use `/plugin config set skillSources <paths>` for source configuration, or `/manage-skills` for skill policy status.");
 			return {};
@@ -170,7 +166,7 @@ async function handleInteractiveConfigEdit(pi: ExtensionAPI, ctx: ExtensionComma
 	} else if (field.key === "updateCheckTTL") {
 		config[field.key] = parseInt(newValue, 10);
 	} else if (field.key === "updateCheckOnStartup") {
-		config[field.key] = newValue as "notify" | "prompt" | "off";
+		config[field.key] = newValue as UpdateCheckStartupMode;
 	} else {
 		(config as Record<string, unknown>)[field.key] = newValue;
 	}
@@ -430,24 +426,6 @@ async function handleBrowseCommand(pi: ExtensionAPI, args: string[], ctx: Extens
 	if (ctx.hasUI) return await selectPluginFromMarketplace(pi, ctx, state, marketplaceName);
 	await emit(pi, ctx, formatBrowseList(await listMarketplacePlugins(state, marketplaceName), marketplaceName));
 	return {};
-}
-
-async function refreshMarketplaceRecords(state: State, marketplaceNames?: string[]): Promise<Map<string, string>> {
-	const targets = marketplaceNames
-		? [...new Set(marketplaceNames)].map((name) => {
-			const record = state.marketplaces[name];
-			if (!record) throw new Error(`Unknown marketplace: ${name}`);
-			return record;
-		})
-		: Object.values(state.marketplaces);
-	const renamed = new Map<string, string>();
-	for (const target of targets) {
-		const refreshed = await refreshMarketplace(target);
-		delete state.marketplaces[target.name];
-		state.marketplaces[refreshed.name] = refreshed;
-		renamed.set(target.name, refreshed.name);
-	}
-	return renamed;
 }
 
 function removeUpdatedEntryForRenamedMarketplace(state: State, oldKey: string, newKey: string, entry: { scope: Scope; projectPath?: string }): void {

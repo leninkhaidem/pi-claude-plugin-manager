@@ -114,6 +114,8 @@ export type ClaudeSettingsFile = {
 	enabledPlugins?: Record<string, boolean>;
 };
 
+export type UpdateCheckStartupMode = "auto" | "notify" | "prompt" | "off";
+
 export type ManagerConfig = {
 	claudeReadOnlyImports?: boolean;
 	claudeDir?: string;
@@ -123,7 +125,7 @@ export type ManagerConfig = {
 	skillSources?: string[];
 	updateCheckEnabled?: boolean;
 	updateCheckTTL?: number;
-	updateCheckOnStartup?: "notify" | "prompt" | "off";
+	updateCheckOnStartup?: UpdateCheckStartupMode;
 };
 
 export type ResolvedManagerConfig = Required<ManagerConfig>;
