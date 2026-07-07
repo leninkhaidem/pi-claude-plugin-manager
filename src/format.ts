@@ -56,6 +56,8 @@ Dev plugins are skipped during /plugin update and update checks.
 
 ## Update checks
 Startup update checks support updateCheckOnStartup values: auto (default), notify, prompt, or off.
+auto runs in the background in UI startup sessions and installs detected non-dev plugin updates, then tells you to run /reload or /plugin reload when ready; it never reloads automatically.
+notify is check-only, prompt asks before sending follow-up commands, and off disables startup checks. Non-UI startup never auto-installs.
 Use /plugin check-updates to review detected updates manually; /plugin update remains the explicit install command.
 
 ## GitHub Enterprise

@@ -36,7 +36,7 @@ export const CONFIG_FIELDS: ConfigField[] = [
 	},
 	{
 		key: "updateCheckEnabled",
-		description: "Check for plugin updates on startup",
+		description: "Enable startup plugin update checks and UI startup auto-update",
 		values: ["true", "false"],
 	},
 	{

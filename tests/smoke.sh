@@ -213,6 +213,7 @@ JITI_FS_CACHE="$TMP/jiti-cache" PI_CODING_AGENT_DIR="$AGENT" node --import "$JIT
 JITI_FS_CACHE="$TMP/jiti-cache" node --import "$JITI_REGISTER" "$ROOT/tests/update-version-reporting.mjs" | grep -q "update version reporting smoke ok"
 JITI_FS_CACHE="$TMP/jiti-cache" node --import "$JITI_REGISTER" "$ROOT/tests/config-auto-mode.mjs" | grep -q "config auto mode tests ok"
 JITI_FS_CACHE="$TMP/jiti-cache" node --import "$JITI_REGISTER" "$ROOT/tests/auto-update-helper.mjs" | grep -q "auto update helper tests ok"
+JITI_FS_CACHE="$TMP/jiti-cache" node --import "$JITI_REGISTER" "$ROOT/tests/startup-auto-update.mjs" | grep -q "startup auto update tests ok"
 JITI_FS_CACHE="$TMP/jiti-cache" node --import "$JITI_REGISTER" "$ROOT/tests/skill-policy.mjs" | grep -q "skill policy tests ok"
 JITI_FS_CACHE="$TMP/jiti-cache" node --import "$JITI_REGISTER" "$ROOT/tests/manage-skills-enforcement.mjs" | grep -q "manage skills enforcement tests ok"
 JITI_FS_CACHE="$TMP/jiti-cache" node --import "$JITI_REGISTER" "$ROOT/tests/manage-skills-tui.mjs" | grep -q "manage skills tui tests ok"
