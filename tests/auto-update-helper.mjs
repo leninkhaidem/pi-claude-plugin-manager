@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { existsSync, readdirSync } from "node:fs";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -78,6 +78,13 @@ function assertNoMarketplaceReferences(state, marketplace) {
 		assert(!key.endsWith(`@${marketplace}`), `stale pending result key remained: ${key}`);
 		assert(result.marketplace !== marketplace, `stale pending result marketplace remained: ${JSON.stringify(result)}`);
 	}
+}
+
+function assertInstallPathVersion(entry, expectedVersion, label) {
+	const manifestPath = path.join(entry.installPath, ".claude-plugin/plugin.json");
+	assert(existsSync(manifestPath), `${label} install path is missing: ${manifestPath}`);
+	const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+	assert(manifest.version === expectedVersion, `${label} install path version mismatch: expected ${expectedVersion}, got ${manifest.version}`);
 }
 
 async function createRenameFixture(root, marketplaceName) {
@@ -165,7 +172,49 @@ try {
 	git(remoteWork, ["commit", "-m", "bump with bad source"]);
 	git(remoteWork, ["push", "origin", "main"]);
 
-	const detected = await runUpdateCheck(await readState(), true);
+	const gitWrapperDir = path.join(tmp, "git-wrapper");
+	const gitWrapper = path.join(gitWrapperDir, "git");
+	const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+	await mkdir(gitWrapperDir, { recursive: true });
+	await writeFile(gitWrapper, `#!/usr/bin/env bash
+set -euo pipefail
+REAL_GIT=${JSON.stringify(realGit)}
+if [[ "\${PI_TEST_MUTATE_STATE_ON_SHOW:-}" != "" && "\${1:-}" == "show" && "\${2:-}" == "FETCH_HEAD:.claude-plugin/marketplace.json" ]]; then
+	node "$PI_TEST_MUTATE_STATE_ON_SHOW"
+fi
+exec "$REAL_GIT" "$@"
+`);
+	await chmod(gitWrapper, 0o755);
+	const mutateStateScript = path.join(tmp, "mutate-state-during-check.mjs");
+	await writeFile(mutateStateScript, `import { readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+const statePath = path.join(process.env.PI_CODING_AGENT_DIR, "claude-plugin-manager/state.json");
+const state = JSON.parse(await readFile(statePath, "utf8"));
+state.plugins["manual@fixture-marketplace"] = [{
+	scope: "user",
+	marketplace: "fixture-marketplace",
+	plugin: "manual",
+	version: "manual",
+	installPath: "/tmp/manual-plugin-path",
+	source: "plugins/manual",
+	installedAt: new Date(0).toISOString()
+}];
+state.enabledPlugins["manual@fixture-marketplace"] = false;
+await writeFile(statePath, JSON.stringify(state, null, 2) + "\\n", "utf8");
+`);
+	const originalPath = process.env.PATH;
+	let detected;
+	process.env.PATH = `${gitWrapperDir}:${originalPath}`;
+	process.env.PI_TEST_MUTATE_STATE_ON_SHOW = mutateStateScript;
+	try {
+		detected = await runUpdateCheck(await readState(), true);
+	} finally {
+		process.env.PATH = originalPath;
+		delete process.env.PI_TEST_MUTATE_STATE_ON_SHOW;
+	}
+	let stateAfterCheck = await readState();
+	assert(stateAfterCheck.plugins["manual@fixture-marketplace"]?.[0]?.version === "manual", "runUpdateCheck clobbered concurrent plugin state mutation");
+	assert(stateAfterCheck.enabledPlugins["manual@fixture-marketplace"] === false, "runUpdateCheck clobbered concurrent enabled-state mutation");
 	assert(detected["demo@fixture-marketplace"], "runUpdateCheck did not detect demo update");
 	assert(detected["bad@fixture-marketplace"], "runUpdateCheck did not detect bad update");
 	assert(detected["other@fixture-marketplace"], "runUpdateCheck did not detect other update");
@@ -299,6 +348,41 @@ try {
 	assert(!updatedState.lastUpdateCheckResults || Object.keys(updatedState.lastUpdateCheckResults).length === 0, "renamed complete retry should clear pending results");
 	assert(versionsFor(updatedState, `demo@${completeNewMarketplace}`).every((entry) => entry.version === "1.2.0"), "renamed complete demo retry did not install repaired version");
 	assert(versionsFor(updatedState, `bad@${completeNewMarketplace}`).every((entry) => entry.version === "1.2.0"), "renamed complete bad retry did not install repaired version");
+	assertNoInstallTemps(agentDir);
+
+	const conflictRoot = path.join(tmp, "conflict-rollback");
+	await mkdir(conflictRoot, { recursive: true });
+	await writeState(defaultState());
+	const conflictMarketplace = "conflict-marketplace";
+	const conflictFixture = await createRenameFixture(conflictRoot, conflictMarketplace);
+	const conflictKey = `demo@${conflictMarketplace}`;
+	const conflictOriginal = (await readState()).plugins[conflictKey][0];
+	const conflictOriginalPath = conflictOriginal.installPath;
+	assertInstallPathVersion(conflictOriginal, "1.0.0", "conflict original before update");
+	await writeMarketplace(conflictFixture.remoteWork, { demo: "1.1.0", bad: "1.0.0", other: "1.0.0" }, { marketplaceName: conflictMarketplace });
+	git(conflictFixture.remoteWork, ["add", "."]);
+	git(conflictFixture.remoteWork, ["commit", "-m", "bump demo for conflict rollback"]);
+	git(conflictFixture.remoteWork, ["push", "origin", "main"]);
+	const conflictDetected = await runUpdateCheck(await readState(), true);
+	assert(conflictDetected[conflictKey], "conflict rollback check did not detect demo update");
+	const conflictResult = await installDetectedPluginUpdates({ [conflictKey]: conflictDetected[conflictKey] }, {
+		cwd: conflictRoot,
+		beforeFreshStateRead: async () => {
+			const concurrent = await readState();
+			const entry = concurrent.plugins[conflictKey][0];
+			concurrent.plugins[conflictKey] = [{ ...entry, scope: "project", projectPath: conflictRoot }];
+			await writeState(concurrent);
+		},
+	});
+	assert(!conflictResult.stateUpdated, "conflicting auto-update should not write stale successful state");
+	assert(conflictResult.successfulEntries === 0, `conflicting auto-update should not report committed successes: ${JSON.stringify(conflictResult)}`);
+	assert(conflictResult.failures.some((failure) => failure.key === conflictKey && failure.reason.includes("changed or was removed")), `expected conflict failure: ${JSON.stringify(conflictResult.failures)}`);
+	updatedState = await readState();
+	const conflictPersisted = updatedState.plugins[conflictKey][0];
+	assert(conflictPersisted.scope === "project" && conflictPersisted.projectPath === conflictRoot, "concurrent conflict state mutation was not preserved");
+	assert(conflictPersisted.installPath === conflictOriginalPath, "conflicted state should still point at the previous install path");
+	assertInstallPathVersion(conflictPersisted, "1.0.0", "conflict original after rollback");
+	assert(!existsSync(path.join(agentDir, "claude-plugin-manager/cache", conflictMarketplace, "demo", "1.1.0")), "uncommitted conflict install path should be rolled back");
 	assertNoInstallTemps(agentDir);
 
 	console.log("auto update helper tests ok");

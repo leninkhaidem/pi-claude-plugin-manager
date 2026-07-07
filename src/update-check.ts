@@ -1,7 +1,7 @@
 import { DEFAULT_UPDATE_CHECK_TTL } from "./constants.js";
 import { clearRuntimeCaches } from "./runtime-cache.js";
 import { run, gitHead } from "./git.js";
-import { installPluginFromMarketplace } from "./installer.js";
+import { commitDeferredInstallCleanup, installPluginFromMarketplaceWithDeferredCleanup, rollbackDeferredInstallCleanup, type DeferredInstallCleanup } from "./installer.js";
 import { refreshMarketplaceRecords } from "./marketplace.js";
 import { readConfig, readState, writeState } from "./state.js";
 import type { InstalledPluginEntry, ManagerConfig, MarketplaceRecord, Scope, State, UpdateCheckResult } from "./types.js";
@@ -153,9 +153,14 @@ export async function runUpdateCheck(state: State, force = false): Promise<Recor
 		results = {};
 	}
 
-	state.lastUpdateCheckAt = now();
+	const checkedAt = now();
+	state.lastUpdateCheckAt = checkedAt;
 	state.lastUpdateCheckResults = results;
-	await writeState(state);
+
+	const latestState = await readState();
+	latestState.lastUpdateCheckAt = checkedAt;
+	latestState.lastUpdateCheckResults = results;
+	await writeState(latestState);
 
 	return results;
 }
@@ -214,6 +219,7 @@ type SuccessfulStateApplication = {
 	success: TargetedUpdateInstallSuccess;
 	originalEntry: InstalledPluginEntry;
 	installedEntry: InstalledPluginEntry;
+	cleanup: DeferredInstallCleanup;
 };
 
 function cloneState(state: State): State {
@@ -481,7 +487,13 @@ function mergeSuccessfulApplications(
  * The helper refreshes affected marketplaces, skips dev-linked entries per entry,
  * continues after per-entry failures, and writes a targeted merge into fresh state.
  */
-export async function installDetectedPluginUpdates(detectedUpdates: Record<string, UpdateCheckResult>, options: { cwd: string }): Promise<TargetedUpdateInstallResult> {
+type InstallDetectedPluginUpdatesOptions = {
+	cwd: string;
+	/** @internal deterministic race-injection seam for persistence/conflict regression tests. */
+	beforeFreshStateRead?: () => Promise<void> | void;
+};
+
+export async function installDetectedPluginUpdates(detectedUpdates: Record<string, UpdateCheckResult>, options: InstallDetectedPluginUpdatesOptions): Promise<TargetedUpdateInstallResult> {
 	const detectedKeys = Object.keys(detectedUpdates).sort();
 	const baseState = cloneState(await readState());
 	let workingState = cloneState(baseState);
@@ -544,7 +556,7 @@ export async function installDetectedPluginUpdates(detectedUpdates: Record<strin
 			attemptedEntries++;
 			const beforeAttempt = cloneState(workingState);
 			try {
-				const installed = await installPluginFromMarketplace(workingState, newKey, entry.scope, entry.projectPath ?? options.cwd);
+				const { installed, cleanup } = await installPluginFromMarketplaceWithDeferredCleanup(workingState, newKey, entry.scope, entry.projectPath ?? options.cwd);
 				removeRenamedOriginalEntry(workingState, key, newKey, entry);
 				const success: TargetedUpdateInstallSuccess = {
 					key,
@@ -559,7 +571,7 @@ export async function installDetectedPluginUpdates(detectedUpdates: Record<strin
 					installPath: installed.installPath,
 				};
 				successes.push(success);
-				successfulApplications.push({ success, originalEntry: entry, installedEntry: installed });
+				successfulApplications.push({ success, originalEntry: entry, installedEntry: installed, cleanup });
 			} catch (error) {
 				workingState = beforeAttempt;
 				failedKeys.add(key);
@@ -577,6 +589,7 @@ export async function installDetectedPluginUpdates(detectedUpdates: Record<strin
 		}
 	}
 
+	if (options.beforeFreshStateRead) await options.beforeFreshStateRead();
 	const latestState = await readState();
 	const { merged, conflicts } = mergeSuccessfulApplications(baseState, latestState, workingState, successfulApplications, marketplaceRenames);
 	conflicts.push(...migrateRenamedMarketplacePluginState(merged, marketplaceRenames));
@@ -599,7 +612,14 @@ export async function installDetectedPluginUpdates(detectedUpdates: Record<strin
 	const stateUpdated = conflicts.length === 0;
 	if (stateUpdated) {
 		await writeState(merged);
+		for (const application of successfulApplications) {
+			await commitDeferredInstallCleanup(merged, application.cleanup);
+		}
 		if (successes.length > 0) clearRuntimeCaches();
+	} else {
+		for (const application of [...successfulApplications].reverse()) {
+			await rollbackDeferredInstallCleanup(latestState, application.cleanup);
+		}
 	}
 
 	const committedSuccesses = stateUpdated ? successes : [];
