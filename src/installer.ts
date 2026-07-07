@@ -1,9 +1,10 @@
-import { cp, lstat, mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
+import { cp, lstat, mkdir, mkdtemp, rename, rm, symlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { gitClone, gitHead } from "./git.js";
 import { findMarketplacePlugin, resolveMarketplacePluginSource } from "./marketplace.js";
 import { readPluginManifest } from "./resources.js";
+import { exists } from "./fs-utils.js";
 import { cacheDir } from "./state.js";
 import type { InstalledPluginEntry, MarketplaceFile, MarketplacePluginEntry, MarketplaceRecord, Scope, State } from "./types.js";
 import { isInstallPathReferenced, normalizePath, parsePluginSpec, pluginKey, resolveExistingInside, safeSegment, now } from "./utils.js";
@@ -111,12 +112,50 @@ async function cleanUpReplacedEntries(state: State, replaced: InstalledPluginEnt
 	}
 }
 
-export async function installPluginFromMarketplace(state: State, spec: string, scope: Scope, cwd: string, options?: { dev?: boolean }): Promise<InstalledPluginEntry> {
+export type DeferredInstallCleanup = {
+	installed: InstalledPluginEntry;
+	replaced: InstalledPluginEntry[];
+	/** Backup of an overwritten same-version install path; retained until state commit or rollback. */
+	backupPath?: string;
+};
+
+type InstallPluginFromMarketplaceOptions = { dev?: boolean; deferCleanup?: boolean };
+
+type InstallPluginFromMarketplaceResult = {
+	installed: InstalledPluginEntry;
+	deferredCleanup?: DeferredInstallCleanup;
+};
+
+export async function commitDeferredInstallCleanup(state: State, cleanup: DeferredInstallCleanup): Promise<void> {
+	await cleanUpReplacedEntries(state, cleanup.replaced, cleanup.installed.installPath);
+	if (cleanup.backupPath) await rm(cleanup.backupPath, { recursive: true, force: true });
+}
+
+export async function rollbackDeferredInstallCleanup(state: State, cleanup: DeferredInstallCleanup): Promise<void> {
+	const installPath = cleanup.installed.installPath;
+	if (cleanup.backupPath) {
+		await removeInstallPath(installPath);
+		if (isInstallPathReferenced(state, installPath)) {
+			await mkdir(path.dirname(installPath), { recursive: true });
+			await rename(cleanup.backupPath, installPath);
+		} else {
+			await rm(cleanup.backupPath, { recursive: true, force: true });
+		}
+		return;
+	}
+
+	if (!isInstallPathReferenced(state, installPath)) {
+		await removeInstallPath(installPath);
+	}
+}
+
+async function installPluginFromMarketplaceInternal(state: State, spec: string, scope: Scope, cwd: string, options?: InstallPluginFromMarketplaceOptions): Promise<InstallPluginFromMarketplaceResult> {
 	const { key, record, marketplaceFile, entry } = await findMarketplacePlugin(state, spec);
 	// Auto-detect: local marketplaces always use symlink (dev) mode unless explicitly overridden
 	const dev = options?.dev ?? (record.source.kind === "local");
 
 	if (dev) {
+		if (options?.deferCleanup) throw new Error("Deferred cleanup is not supported for dev-mode installs.");
 		if (record.source.kind !== "local") {
 			throw new Error(`--dev mode requires a local marketplace. ${record.name} is a ${record.source.kind} marketplace. Add it as a local path first.`);
 		}
@@ -152,10 +191,12 @@ export async function installPluginFromMarketplace(state: State, spec: string, s
 		state.plugins[key] = [...current.filter((existing) => existing.scope !== scope || existing.projectPath !== installed.projectPath), installed];
 		if (!hadEnabledState) state.enabledPlugins[key] = true;
 		await cleanUpReplacedEntries(state, replaced, installed.installPath);
-		return installed;
+		return { installed };
 	}
 
 	const tmp = await mkdtemp(path.join(os.tmpdir(), "pi-claude-plugin-install-"));
+	let stagingPath: string | undefined;
+	let backupPath: string | undefined;
 	try {
 		const checkout = path.join(tmp, "plugin");
 		await mkdir(checkout, { recursive: true });
@@ -164,10 +205,35 @@ export async function installPluginFromMarketplace(state: State, spec: string, s
 		const manifest = await readPluginManifest(checkout);
 		const version = manifest?.version ?? entry.version ?? copied.gitCommitSha?.slice(0, 12) ?? "unknown";
 		const installPath = path.join(cacheDir(), safeSegment(record.name), safeSegment(entry.name), safeSegment(version));
-		await rm(installPath, { recursive: true, force: true });
-		await mkdir(path.dirname(installPath), { recursive: true });
-		await cp(checkout, installPath, { recursive: true });
-		await rm(path.join(installPath, ".git"), { recursive: true, force: true });
+		const installDir = path.dirname(installPath);
+		const stagingSegment = `.${safeSegment(entry.name)}-${safeSegment(version)}-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+		stagingPath = path.join(installDir, `${stagingSegment}.tmp`);
+		backupPath = path.join(installDir, `${stagingSegment}.bak`);
+		await mkdir(installDir, { recursive: true });
+		await rm(stagingPath, { recursive: true, force: true });
+		await rm(backupPath, { recursive: true, force: true });
+		await cp(checkout, stagingPath, { recursive: true });
+		await rm(path.join(stagingPath, ".git"), { recursive: true, force: true });
+
+		let backupCommitted = false;
+		try {
+			if (await exists(installPath)) {
+				await rename(installPath, backupPath);
+				backupCommitted = true;
+			}
+			await rename(stagingPath, installPath);
+			stagingPath = undefined;
+		} catch (error) {
+			if (backupCommitted && !(await exists(installPath))) {
+				try {
+					await rename(backupPath, installPath);
+					backupCommitted = false;
+				} catch (restoreError) {
+					throw new Error(`Failed to commit install for ${entry.name}; restore failed: ${(restoreError as Error).message}; original error: ${(error as Error).message}`);
+				}
+			}
+			throw error;
+		}
 
 		const installed: InstalledPluginEntry = {
 			scope,
@@ -190,11 +256,38 @@ export async function installPluginFromMarketplace(state: State, spec: string, s
 		const hadEnabledState = Object.prototype.hasOwnProperty.call(state.enabledPlugins, key);
 		state.plugins[key] = [...current.filter((existing) => existing.scope !== scope || existing.projectPath !== installed.projectPath), installed];
 		if (!hadEnabledState) state.enabledPlugins[key] = true;
+		if (options?.deferCleanup) {
+			const deferredCleanup: DeferredInstallCleanup = {
+				installed,
+				replaced,
+				backupPath: backupCommitted ? backupPath : undefined,
+			};
+			if (backupCommitted) backupPath = undefined;
+			return { installed, deferredCleanup };
+		}
 		await cleanUpReplacedEntries(state, replaced, installed.installPath);
-		return installed;
+		if (backupCommitted && backupPath) {
+			await rm(backupPath, { recursive: true, force: true });
+			backupPath = undefined;
+		}
+		return { installed };
 	} finally {
+		if (stagingPath) await rm(stagingPath, { recursive: true, force: true });
+		if (backupPath) await rm(backupPath, { recursive: true, force: true });
 		await rm(tmp, { recursive: true, force: true });
 	}
+}
+
+export async function installPluginFromMarketplace(state: State, spec: string, scope: Scope, cwd: string, options?: { dev?: boolean }): Promise<InstalledPluginEntry> {
+	return (await installPluginFromMarketplaceInternal(state, spec, scope, cwd, options)).installed;
+}
+
+export async function installPluginFromMarketplaceWithDeferredCleanup(state: State, spec: string, scope: Scope, cwd: string): Promise<{ installed: InstalledPluginEntry; cleanup: DeferredInstallCleanup }> {
+	const result = await installPluginFromMarketplaceInternal(state, spec, scope, cwd, { deferCleanup: true });
+	return {
+		installed: result.installed,
+		cleanup: result.deferredCleanup ?? { installed: result.installed, replaced: [] },
+	};
 }
 
 export async function uninstallPlugin(state: State, spec: string, scope?: Scope, cwd?: string): Promise<string[]> {

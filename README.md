@@ -218,13 +218,17 @@ On startup, the plugin manager checks for available updates from git-based marke
 
 | Mode | Description |
 | --- | --- |
-| `notify` (default) | Non-blocking notification with update count |
-| `prompt` | Interactive select: update all, select which, skip, or disable |
-| `off` | No startup checks |
+| `auto` (default) | UI startup only: run the due check in the background, install detected non-dev Pi-managed plugin updates, then show a success/error notification with `/reload` or `/plugin reload` guidance when anything changed. It never reloads automatically. |
+| `notify` | Check only and show an informational notification with the update count; no install is attempted. |
+| `prompt` | Interactive select: update all, select which, skip, or disable. Follow-up update commands only run after your selection. |
+| `off` | No startup checks. |
+
+Startup auto-update is intentionally UI-only so headless/non-TUI startup does not silently mutate installed plugins. Manual commands still work in non-UI contexts.
 
 Configure with:
 
 ```text
+/plugin config set updateCheckOnStartup auto
 /plugin config set updateCheckOnStartup notify
 /plugin config set updateCheckOnStartup prompt
 /plugin config set updateCheckOnStartup off
@@ -238,9 +242,10 @@ Force-check for updates (ignores TTL):
 
 ```text
 /plugin check-updates
+/plugin check-update
 ```
 
-In the TUI this shows an interactive checkbox to select which plugins to update.
+In the TUI this shows an interactive checkbox to review/select plugins before installing. In non-UI mode it prints the detected updates. Use `/plugin update` when you explicitly want to update installed plugins.
 
 ## Updating
 
@@ -282,7 +287,7 @@ Supported keys:
 | `skillSources` | Additional directories to discover skills from. | `[]` |
 | `updateCheckEnabled` | Enable/disable startup update checks. | `true` |
 | `updateCheckTTL` | Minimum ms between update checks. | `86400000` (24h) |
-| `updateCheckOnStartup` | Startup behavior: `notify`, `prompt`, or `off`. | `notify` |
+| `updateCheckOnStartup` | Startup behavior: `auto`, `notify`, `prompt`, or `off`. `auto` installs detected non-dev updates only during eligible UI startup checks and never reloads automatically. | `auto` |
 
 Examples:
 

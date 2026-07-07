@@ -6,6 +6,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-07
+
+### Added
+
+- Added automatic startup plugin updates for UI sessions: when an update check is due, eligible non-dev plugins install in the background and notify the user without blocking startup or reloading resources automatically.
+- Added `auto` as the default `updateCheckOnStartup` mode while preserving `notify`, `prompt`, and `off` for users who want check-only, interactive, or disabled startup behavior.
+
+### Changed
+
+- Kept `/plugin check-updates` as the manual review and selection flow while startup auto-update handles eligible updates automatically.
+- Improved startup update notifications with success/error severity, partial-failure details, and reload guidance so users know when to run `/reload` or `/plugin reload`.
+
+### Fixed
+
+- Preserved failed pending update checks across unchanged marketplace HEAD checks so failed or renamed updates remain retryable until installed or resolved.
+- Protected plugin state during automatic installs so persistence conflicts and install failures report errors without silently dropping update state.
+
 ## [0.6.3] - 2026-07-03
 
 ### Fixed
@@ -207,7 +224,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Installation guidance for pinned releases, latest `main`, project-local installs, and local development.
 - Command reference, configuration reference, marketplace source examples, current coverage, and known limitations.
 
-[Unreleased]: https://github.com/leninkhaidem/pi-claude-plugin-manager/compare/v0.6.2...HEAD
+[Unreleased]: https://github.com/leninkhaidem/pi-claude-plugin-manager/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/leninkhaidem/pi-claude-plugin-manager/releases/tag/v0.7.0
+[0.6.3]: https://github.com/leninkhaidem/pi-claude-plugin-manager/releases/tag/v0.6.3
 [0.6.2]: https://github.com/leninkhaidem/pi-claude-plugin-manager/releases/tag/v0.6.2
 [0.6.1]: https://github.com/leninkhaidem/pi-claude-plugin-manager/releases/tag/v0.6.1
 [0.6.0]: https://github.com/leninkhaidem/pi-claude-plugin-manager/releases/tag/v0.6.0

@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import { DEFAULT_CLAUDE_DIR, STATE_VERSION } from "./constants.js";
+import { DEFAULT_CLAUDE_DIR, DEFAULT_UPDATE_CHECK_TTL, STATE_VERSION } from "./constants.js";
 import { exists, readJsonFile } from "./fs-utils.js";
 import { defaultSkillPolicy, disabledSkillPathRecordForCompatibility, disabledSourcePathRecordForCompatibility, normalizeSkillPolicy } from "./skill-policy.js";
 import type { ManagerConfig, ResolvedManagerConfig, State } from "./types.js";
@@ -103,7 +103,11 @@ export function resolveManagerConfig(config: ManagerConfig): ResolvedManagerConf
 	const claudePluginsDir = normalizePath(config.claudePluginsDir ?? path.join(claudeDir, "plugins"));
 	const claudeSettingsPath = normalizePath(config.claudeSettingsPath ?? path.join(claudeDir, "settings.json"));
 	const claudeInstalledPluginsPath = normalizePath(config.claudeInstalledPluginsPath ?? path.join(claudePluginsDir, "installed_plugins.json"));
-	return { claudeReadOnlyImports, claudeDir, claudePluginsDir, claudeSettingsPath, claudeInstalledPluginsPath };
+	const skillSources = config.skillSources ?? [];
+	const updateCheckEnabled = config.updateCheckEnabled ?? true;
+	const updateCheckTTL = config.updateCheckTTL ?? DEFAULT_UPDATE_CHECK_TTL;
+	const updateCheckOnStartup = config.updateCheckOnStartup ?? "auto";
+	return { claudeReadOnlyImports, claudeDir, claudePluginsDir, claudeSettingsPath, claudeInstalledPluginsPath, skillSources, updateCheckEnabled, updateCheckTTL, updateCheckOnStartup };
 }
 
 export function formatConfig(config: ManagerConfig): string {
@@ -126,8 +130,8 @@ export function formatConfig(config: ManagerConfig): string {
 	} else {
 		lines.push(`skillSources: (none)`);
 	}
-	lines.push(`updateCheckEnabled: ${config.updateCheckEnabled ?? true}`);
-	lines.push(`updateCheckTTL: ${config.updateCheckTTL ?? "86400000 (24h)"}`);
-	lines.push(`updateCheckOnStartup: ${config.updateCheckOnStartup ?? "notify"}`);
+	lines.push(`updateCheckEnabled: ${resolved.updateCheckEnabled}`);
+	lines.push(`updateCheckTTL: ${config.updateCheckTTL ?? `${resolved.updateCheckTTL} (24h)`}`);
+	lines.push(`updateCheckOnStartup: ${resolved.updateCheckOnStartup}`);
 	return lines.join("\n");
 }

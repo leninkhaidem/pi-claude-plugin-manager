@@ -10,9 +10,11 @@ import { installPluginFromMarketplace } from "./installer.js";
 import { evaluateSkillInvocationBlockWithManagedSkills } from "./enforcement.js";
 import { filterSkillsFromPromptByPolicy } from "./skills.js";
 import { readConfig, readState, writeState } from "./state.js";
-import { isUpdateCheckDue, runUpdateCheck } from "./update-check.js";
+import { createStartupUpdateScheduler } from "./startup-update.js";
 
 export default function claudePluginManager(pi: ExtensionAPI) {
+	const scheduleStartupUpdate = createStartupUpdateScheduler();
+
 	pi.registerMessageRenderer(CUSTOM_MESSAGE_TYPE, (message, _options, theme) => {
 		const content = typeof message.content === "string" ? message.content : JSON.stringify(message.content, null, 2);
 		return new Text(theme.fg("accent", "Claude Plugin Manager") + "\n" + content, 0, 0);
@@ -132,46 +134,16 @@ export default function claudePluginManager(pi: ExtensionAPI) {
 				);
 			}
 
-			// Auto-update check on startup only (not reload/fork/resume)
-			if (event.reason === "startup" && ctx.hasUI && piManaged.length > 0) {
-				const config = await readConfig();
-				if (isUpdateCheckDue(state, config)) {
-					// Run in background — don't block session start
-					runUpdateCheck(state).then(async (results) => {
-						const updateCount = Object.keys(results).length;
-						if (updateCount === 0) return;
-
-						const mode = config.updateCheckOnStartup ?? "notify";
-						if (mode === "notify") {
-							ctx.ui.notify(
-								`[plugin] ${updateCount} plugin update${updateCount === 1 ? "" : "s"} available. Run /plugin check-updates to review.`,
-								"info",
-							);
-						} else if (mode === "prompt") {
-							const entries = Object.entries(results);
-							const summary = entries.map(([key, r]) => `${key}: ${r.installedVersion} → ${r.availableVersion}`).join("\n");
-							const choice = await ctx.ui.select(
-								`${updateCount} plugin update${updateCount === 1 ? "" : "s"} available`,
-								[
-									`Update all (${updateCount})`,
-									"Select which to update",
-									"Skip for now",
-									"Disable update checks",
-								],
-							);
-							if (choice === `Update all (${updateCount})`) {
-								pi.sendUserMessage("/plugin update", { deliverAs: "followUp" });
-							} else if (choice === "Select which to update") {
-								pi.sendUserMessage("/plugin check-updates", { deliverAs: "followUp" });
-							} else if (choice === "Disable update checks") {
-								pi.sendUserMessage("/plugin config set updateCheckOnStartup off", { deliverAs: "followUp" });
-							}
-						}
-					}).catch(() => {
-						// Silently ignore update check failures
-					});
-				}
-			}
+			// Startup update work runs in the background after resource discovery/loading.
+			scheduleStartupUpdate({
+				reason: event.reason,
+				hasUI: ctx.hasUI,
+				ui: ctx.hasUI ? ctx.ui : undefined,
+				pi,
+				cwd: ctx.cwd,
+				state,
+				piManagedCount: piManaged.length,
+			});
 		} catch (error) {
 			if (ctx.hasUI) ctx.ui.notify(`[plugin] Failed to discover Claude plugin resources: ${(error as Error).message}`, "error");
 		}

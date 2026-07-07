@@ -36,7 +36,7 @@ export const CONFIG_FIELDS: ConfigField[] = [
 	},
 	{
 		key: "updateCheckEnabled",
-		description: "Check for plugin updates on startup",
+		description: "Enable startup plugin update checks and UI startup auto-update",
 		values: ["true", "false"],
 	},
 	{
@@ -45,8 +45,8 @@ export const CONFIG_FIELDS: ConfigField[] = [
 	},
 	{
 		key: "updateCheckOnStartup",
-		description: "Startup behavior: notify (non-blocking), prompt (interactive), or off",
-		values: ["notify", "prompt", "off"],
+		description: "Startup behavior: auto (default install), notify (check only), prompt (interactive), or off",
+		values: ["auto", "notify", "prompt", "off"],
 	},
 ];
 
