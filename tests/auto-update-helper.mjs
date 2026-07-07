@@ -242,6 +242,33 @@ await writeFile(statePath, JSON.stringify(state, null, 2) + "\\n", "utf8");
 	assert(updatedState.lastUpdateCheckResults["other@fixture-marketplace"], "unrelated pending other key should be preserved");
 	assertNoInstallTemps(agentDir);
 
+	const dueState = await readState();
+	dueState.lastUpdateCheckAt = new Date(0).toISOString();
+	await writeState(dueState);
+	const dueRecheck = await runUpdateCheck(await readState());
+	assert(dueRecheck["bad@fixture-marketplace"], "due runUpdateCheck with unchanged marketplace HEAD should preserve failed bad pending result");
+	assert(dueRecheck["other@fixture-marketplace"], "due runUpdateCheck with unchanged marketplace HEAD should preserve unresolved other pending result");
+	updatedState = await readState();
+	assert(updatedState.lastUpdateCheckResults?.["bad@fixture-marketplace"], "due runUpdateCheck cleared failed bad pending result from state");
+
+	const forcedRecheck = await runUpdateCheck(await readState(), true);
+	assert(forcedRecheck["bad@fixture-marketplace"], "forced runUpdateCheck with unchanged marketplace HEAD should preserve failed bad pending result");
+	updatedState = await readState();
+	assert(updatedState.lastUpdateCheckResults?.["bad@fixture-marketplace"], "forced runUpdateCheck cleared failed bad pending result from state");
+
+	const unresolvedBeforeResolvedCheck = JSON.parse(JSON.stringify(await readState()));
+	const stateWithResolvedBad = JSON.parse(JSON.stringify(unresolvedBeforeResolvedCheck));
+	const resolvedBadVersion = stateWithResolvedBad.lastUpdateCheckResults["bad@fixture-marketplace"].availableVersion;
+	for (const entry of stateWithResolvedBad.plugins["bad@fixture-marketplace"]) entry.version = resolvedBadVersion;
+	await writeState(stateWithResolvedBad);
+	const resolvedRecheck = await runUpdateCheck(await readState(), true);
+	assert(!resolvedRecheck["bad@fixture-marketplace"], "runUpdateCheck should clear failed pending result once installed version matches available version");
+	assert(resolvedRecheck["other@fixture-marketplace"], "resolved failed key should not clear unrelated unresolved pending result");
+	updatedState = await readState();
+	assert(!updatedState.lastUpdateCheckResults?.["bad@fixture-marketplace"], "resolved failed key remained persisted after runUpdateCheck reconciliation");
+	assert(updatedState.lastUpdateCheckResults?.["other@fixture-marketplace"], "resolved failed key reconciliation should preserve unrelated unresolved pending result");
+	await writeState(unresolvedBeforeResolvedCheck);
+
 	await writeMarketplace(remoteWork, { demo: "1.1.0", bad: "1.2.0", other: "1.1.0" });
 	git(remoteWork, ["add", "."]);
 	git(remoteWork, ["commit", "-m", "repair bad source"]);

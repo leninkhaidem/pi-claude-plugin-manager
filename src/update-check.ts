@@ -2,7 +2,7 @@ import { DEFAULT_UPDATE_CHECK_TTL } from "./constants.js";
 import { clearRuntimeCaches } from "./runtime-cache.js";
 import { run, gitHead } from "./git.js";
 import { commitDeferredInstallCleanup, installPluginFromMarketplaceWithDeferredCleanup, rollbackDeferredInstallCleanup, type DeferredInstallCleanup } from "./installer.js";
-import { refreshMarketplaceRecords } from "./marketplace.js";
+import { loadMarketplace, refreshMarketplaceRecords } from "./marketplace.js";
 import { readConfig, readState, writeState } from "./state.js";
 import type { InstalledPluginEntry, ManagerConfig, MarketplaceRecord, Scope, State, UpdateCheckResult } from "./types.js";
 import { now, pluginKey } from "./utils.js";
@@ -76,8 +76,9 @@ async function checkMarketplaceHeads(state: State): Promise<MarketplaceUpdateInf
 async function comparePluginVersions(
 	state: State,
 	changedMarketplaces: MarketplaceUpdateInfo[],
-): Promise<Record<string, UpdateCheckResult>> {
+): Promise<{ updates: Record<string, UpdateCheckResult>; checkedMarketplaces: Set<string> }> {
 	const updates: Record<string, UpdateCheckResult> = {};
+	const checkedMarketplaces = new Set<string>();
 
 	for (const info of changedMarketplaces) {
 		if (!info.hasRemoteChanges) continue;
@@ -101,6 +102,7 @@ async function comparePluginVersions(
 			}
 
 			const remoteMarketplace = JSON.parse(remoteMarketplaceJson) as { plugins?: Array<{ name: string; version?: string }> };
+			checkedMarketplaces.add(info.record.name);
 			if (!remoteMarketplace.plugins) continue;
 
 			// Compare each installed plugin from this marketplace
@@ -130,7 +132,7 @@ async function comparePluginVersions(
 		}
 	}
 
-	return updates;
+	return { updates, checkedMarketplaces };
 }
 
 /**
@@ -146,20 +148,23 @@ export async function runUpdateCheck(state: State, force = false): Promise<Recor
 	const marketplaceHeads = await checkMarketplaceHeads(state);
 	const changedMarketplaces = marketplaceHeads.filter((m) => m.hasRemoteChanges);
 
-	let results: Record<string, UpdateCheckResult>;
+	let detectedResults: Record<string, UpdateCheckResult> = {};
+	let checkedMarketplaces = new Set<string>();
 	if (changedMarketplaces.length > 0) {
-		results = await comparePluginVersions(state, changedMarketplaces);
-	} else {
-		results = {};
+		const compared = await comparePluginVersions(state, changedMarketplaces);
+		detectedResults = compared.updates;
+		checkedMarketplaces = compared.checkedMarketplaces;
 	}
 
 	const checkedAt = now();
+	const latestState = await readState();
+	const results = await reconcileUpdateCheckResults(latestState, detectedResults, checkedMarketplaces);
 	state.lastUpdateCheckAt = checkedAt;
 	state.lastUpdateCheckResults = results;
 
-	const latestState = await readState();
 	latestState.lastUpdateCheckAt = checkedAt;
-	latestState.lastUpdateCheckResults = results;
+	if (Object.keys(results).length > 0) latestState.lastUpdateCheckResults = results;
+	else delete latestState.lastUpdateCheckResults;
 	await writeState(latestState);
 
 	return results;
@@ -330,6 +335,70 @@ function computePendingResults(
 		if (renamed.key !== key) delete pending[key];
 	}
 	return pending;
+}
+
+function nonDevEntriesForUpdateResult(state: State, key: string, result: UpdateCheckResult): InstalledPluginEntry[] {
+	const canonicalKey = pluginKey(result.plugin, result.marketplace);
+	const candidates = canonicalKey === key
+		? state.plugins[key] ?? []
+		: [...(state.plugins[key] ?? []), ...(state.plugins[canonicalKey] ?? [])];
+	const seen = new Set<string>();
+	const entries: InstalledPluginEntry[] = [];
+	for (const entry of candidates) {
+		if (entry.dev || entry.plugin !== result.plugin || entry.marketplace !== result.marketplace) continue;
+		const identity = entryIdentity(entry);
+		if (seen.has(identity)) continue;
+		seen.add(identity);
+		entries.push(entry);
+	}
+	return entries;
+}
+
+function reconcileUpdateResultAgainstInstalledState(
+	state: State,
+	key: string,
+	result: UpdateCheckResult,
+	availableVersion: string,
+): UpdateCheckResult | undefined {
+	const entries = nonDevEntriesForUpdateResult(state, key, result);
+	if (entries.length === 0) return undefined;
+	const pendingEntry = entries.find((entry) => entry.version !== availableVersion);
+	if (!pendingEntry) return undefined;
+	return {
+		...result,
+		installedVersion: pendingEntry.version,
+		availableVersion,
+	};
+}
+
+async function localMarketplaceAvailableVersion(state: State, result: UpdateCheckResult): Promise<string | undefined> {
+	const record = state.marketplaces[result.marketplace];
+	if (!record) return undefined;
+	try {
+		const marketplace = await loadMarketplace(record);
+		return (marketplace.plugins ?? []).find((plugin) => plugin.name === result.plugin)?.version;
+	} catch {
+		return undefined;
+	}
+}
+
+async function reconcileUpdateCheckResults(
+	latestState: State,
+	detectedResults: Record<string, UpdateCheckResult>,
+	checkedMarketplaces: Set<string>,
+): Promise<Record<string, UpdateCheckResult>> {
+	const reconciled: Record<string, UpdateCheckResult> = {};
+	for (const [key, result] of Object.entries(detectedResults)) {
+		const pending = reconcileUpdateResultAgainstInstalledState(latestState, key, result, result.availableVersion);
+		if (pending) reconciled[key] = pending;
+	}
+	for (const [key, result] of Object.entries(latestState.lastUpdateCheckResults ?? {})) {
+		if (reconciled[key] || checkedMarketplaces.has(result.marketplace)) continue;
+		const availableVersion = await localMarketplaceAvailableVersion(latestState, result) ?? result.availableVersion;
+		const pending = reconcileUpdateResultAgainstInstalledState(latestState, key, result, availableVersion);
+		if (pending) reconciled[key] = pending;
+	}
+	return reconciled;
 }
 
 function entryIsFromMarketplace(entry: InstalledPluginEntry, marketplace: string): boolean {
