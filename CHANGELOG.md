@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-07-08
+
+### Changed
+
+- Changed Manage Skills policy so active enablement is scoped to the current Pi folder only; legacy global skill, source, and name rules are ignored and shown only as compatibility state.
+- Removed global skill and source enablement actions from the Manage Skills TUI so all policy changes apply to the current folder.
+
+### Fixed
+
+- Fixed skill enablement precedence so enabling a skill for the current folder overrides a current-folder source disable for that skill.
+
 ## [0.7.0] - 2026-07-07
 
 ### Added
@@ -224,7 +235,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Installation guidance for pinned releases, latest `main`, project-local installs, and local development.
 - Command reference, configuration reference, marketplace source examples, current coverage, and known limitations.
 
-[Unreleased]: https://github.com/leninkhaidem/pi-claude-plugin-manager/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/leninkhaidem/pi-claude-plugin-manager/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/leninkhaidem/pi-claude-plugin-manager/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/leninkhaidem/pi-claude-plugin-manager/releases/tag/v0.7.0
 [0.6.3]: https://github.com/leninkhaidem/pi-claude-plugin-manager/releases/tag/v0.6.3
 [0.6.2]: https://github.com/leninkhaidem/pi-claude-plugin-manager/releases/tag/v0.6.2
