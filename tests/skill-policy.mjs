@@ -53,6 +53,8 @@ try {
 	assert.equal(state.skillPolicy.global.sources[path.resolve(legacySourcePath)], "disabled");
 	assert.equal(state.disabledSkills[path.resolve(legacySkillPath)], true);
 	assert.equal(state.disabledSkillSources[path.resolve(legacySourcePath)], true);
+	const migratedInventory = await buildSkillList({ getCommands: () => [] }, [legacySkillPath], [], state.skillPolicy, tmp, [legacySourcePath]);
+	assert.equal(migratedInventory.find((row) => row.path === path.resolve(legacySkillPath))?.enabled, true, "migrated legacy global disables are inert for current-folder policy");
 
 	setGlobalSkillPolicy(state.skillPolicy, { name: "legacy-a", path: legacySkillPath }, "enabled");
 	setGlobalSourcePolicy(state.skillPolicy, legacySourcePath, "enabled");
@@ -76,31 +78,32 @@ try {
 	const policy = defaultSkillPolicy();
 	const subject = { name: "folder-skill", path: path.join(tmp, "skills", "folder-skill", "SKILL.md"), sourceRoot: path.join(tmp, "skills") };
 	setGlobalSkillPolicy(policy, subject, "disabled");
-	assert.equal(evaluateSkillPolicy(policy, subject, path.join(tmp, "project")).effectiveState, "disabled");
-	setFolderSkillPolicy(policy, path.join(tmp, "project", "..", "project"), subject, "enabled");
+	let effective = evaluateSkillPolicy(policy, subject, path.join(tmp, "project"));
+	assert.equal(effective.effectiveState, "enabled", "legacy global skill disable is ignored for effective policy");
+	assert.equal(effective.globalState, "disabled", "legacy global skill rule remains visible");
+	setFolderSkillPolicy(policy, path.join(tmp, "project", "..", "project"), subject, "disabled");
 	assert.equal(Object.keys(policy.folders)[0], normalizeStartedFolderKey(path.join(tmp, "project")));
 	const sameFolder = evaluateSkillPolicy(policy, subject, path.join(tmp, "project"));
-	assert.equal(sameFolder.effectiveState, "enabled");
+	assert.equal(sameFolder.effectiveState, "disabled");
 	assert.equal(sameFolder.winningScope, "folder");
-	assert.equal(evaluateSkillPolicy(policy, subject, path.join(tmp, "other")).effectiveState, "disabled");
+	assert.equal(evaluateSkillPolicy(policy, subject, path.join(tmp, "other")).effectiveState, "enabled", "folder A disable does not affect folder B");
 	assert.equal(JSON.stringify(policy).includes("effectiveState"), false, "effective state is derived, not persisted in policy");
 
 	const sourcePrecedence = defaultSkillPolicy();
 	const sourcePrecedenceSubject = { name: "source-precedence", path: path.join(tmp, "source-precedence", "source-precedence", "SKILL.md"), sourceRoot: path.join(tmp, "source-precedence") };
-	setGlobalSkillPolicy(sourcePrecedence, sourcePrecedenceSubject, "enabled");
+	setGlobalSkillPolicy(sourcePrecedence, sourcePrecedenceSubject, "disabled");
 	setGlobalSourcePolicy(sourcePrecedence, sourcePrecedenceSubject.sourceRoot, "disabled");
 	let sourcePrecedenceResult = evaluateSkillPolicy(sourcePrecedence, sourcePrecedenceSubject, tmp);
-	assert.equal(sourcePrecedenceResult.effectiveState, "disabled", "global source disable dominates same-scope path enable");
-	assert.equal(sourcePrecedenceResult.winningTarget, "source");
+	assert.equal(sourcePrecedenceResult.effectiveState, "enabled", "legacy global source and skill disables are ignored");
+	assert.equal(sourcePrecedenceResult.globalState, "disabled", "ignored global source/skill rule remains visible");
 	const sourceNamePrecedenceSubject = { name: "source-name-precedence", path: path.join(sourcePrecedenceSubject.sourceRoot, "source-name-precedence", "SKILL.md"), sourceRoot: sourcePrecedenceSubject.sourceRoot };
-	setGlobalSkillPolicy(sourcePrecedence, { name: sourceNamePrecedenceSubject.name }, "enabled");
-	assert.equal(evaluateSkillPolicy(sourcePrecedence, sourceNamePrecedenceSubject, tmp).effectiveState, "disabled", "global source disable dominates same-scope name enable when source identity is known");
-	setFolderSkillPolicy(sourcePrecedence, tmp, sourcePrecedenceSubject, "enabled");
 	setFolderSourcePolicy(sourcePrecedence, tmp, sourcePrecedenceSubject.sourceRoot, "disabled");
+	assert.equal(evaluateSkillPolicy(sourcePrecedence, sourceNamePrecedenceSubject, tmp).effectiveState, "disabled", "folder source disable applies when no explicit current-folder skill rule exists");
+	setFolderSkillPolicy(sourcePrecedence, tmp, sourcePrecedenceSubject, "enabled");
 	sourcePrecedenceResult = evaluateSkillPolicy(sourcePrecedence, sourcePrecedenceSubject, tmp);
-	assert.equal(sourcePrecedenceResult.effectiveState, "disabled", "folder source disable dominates same-scope path enable");
+	assert.equal(sourcePrecedenceResult.effectiveState, "enabled", "current-folder skill enable overrides current-folder source disable for that skill");
 	assert.equal(sourcePrecedenceResult.winningScope, "folder");
-	assert.equal(sourcePrecedenceResult.winningTarget, "source");
+	assert.equal(sourcePrecedenceResult.winningTarget, "skill");
 
 	const dupRootA = path.join(tmp, "dup-a");
 	const dupRootB = path.join(tmp, "dup-b");
@@ -117,7 +120,7 @@ try {
 	assert.equal(inventory.length, 2);
 	assert.ok(inventory.every((row) => row.duplicateName && row.sameNameCount === 2));
 	assert.ok(inventory.every((row) => row.identityKind === "path" && row.path && row.sourceRoot && row.sourceLabel));
-	assert.equal(inventory.find((row) => row.path === path.resolve(dupSkillA)).effectiveState, "disabled");
+	assert.equal(inventory.find((row) => row.path === path.resolve(dupSkillA)).effectiveState, "enabled", "legacy global source disable is ignored in inventory");
 	assert.equal(inventory.find((row) => row.path === path.resolve(dupSkillB)).effectiveState, "enabled");
 
 	assert.equal(statePath().startsWith(path.join(agentDir, "claude-plugin-manager")), true);
