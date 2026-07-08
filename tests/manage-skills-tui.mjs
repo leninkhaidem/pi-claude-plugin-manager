@@ -130,7 +130,7 @@ try {
 	assert.match(dashboard, /Description/, "right detail pane is visible without opening a second page");
 	assert.match(dashboard, /Alpha full description/, "selected skill description appears in the detail pane");
 	assert.doesNotMatch(dashboard, /TAIL-MARKER-ALPHA-DESCRIPTION/, "dashboard detail preview stays compact");
-	assert.doesNotMatch(dashboard, /g global|Enter actions|Set source globally|G\s+F\s+Eff/, "main dashboard does not advertise old global/source/action shortcuts");
+	assert.doesNotMatch(dashboard, /g global|Global default|Enter actions|Set source globally|G\s+F\s+Eff/, "main dashboard does not advertise old global/source/action shortcuts or wording");
 	assert.match(renderText(component, 50), /Esc close/, "narrow dashboard footer keeps the close shortcut visible");
 	assert.match(renderText(component, 72), /Esc close/, "common-width dashboard footer keeps the close shortcut visible");
 	const selectedAlphaLine = dashboard.split("\n").find((line) => line.includes("❯ alpha")) ?? "";
@@ -200,8 +200,8 @@ try {
 	component.handleInput("a");
 	let advanced = renderText(component, 110);
 	assert.match(advanced, /Advanced policy: alpha/, "a opens the advanced policy screen");
-	assert.match(advanced, /Set global default: disabled/, "advanced screen contains global controls");
-	assert.match(advanced, /Set source globally: disabled/, "advanced screen contains source controls");
+	assert.doesNotMatch(advanced, /Set global default|Set source globally|Global default/, "advanced screen hides legacy global controls and wording");
+	assert.match(advanced, /Disable source in this folder/, "advanced screen retains current-folder source controls");
 	assertWidthSafe(component, [72, 110]);
 	component.handleInput("\x1B");
 	assert.match(renderText(component, 110), /Skill Manager/, "escape returns from advanced screen to dashboard");
@@ -214,6 +214,26 @@ try {
 	details = renderText(component, 72);
 	assert.match(details, /TAIL-MARKER-ALPHA-DESCRIPTION/, "details drawer can scroll to the complete description tail");
 	component.handleInput("\x1B");
+
+	const legacyState = defaultState();
+	legacyState.skillPolicy.global.skills[paths[0]] = "disabled";
+	legacyState.skillPolicy.global.sources[sourceRoot] = "disabled";
+	const legacySkills = await buildSkillList(pi, paths.slice(0, 2), [], legacyState.skillPolicy, tmp, [sourceRoot]);
+	const legacySources = buildSourceList(legacySkills, [sourceRoot], legacyState.skillPolicy, tmp);
+	const legacyComponent = createManageSkillsTui({
+		cwd: tmp,
+		skills: legacySkills,
+		sources: legacySources,
+		state: legacyState,
+		saveState: async () => {},
+		done: () => {},
+		tui: makeHost(),
+	});
+	const legacyDashboard = renderText(legacyComponent, 120);
+	assert.match(legacyDashboard, /Ignored legacy global rules: 2/, "TUI shows ignored legacy global rule count");
+	assert.match(legacyDashboard, /alpha\s+on\s+default/, "legacy global disables do not turn current-folder skill off");
+	legacyComponent.handleInput("a");
+	assert.doesNotMatch(renderText(legacyComponent, 120), /Set global default|Set source globally|Global default/, "legacy-aware advanced drawer still hides global actions");
 
 	const themedComponent = createManageSkillsTui({
 		cwd: tmp,

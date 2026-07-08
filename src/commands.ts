@@ -12,7 +12,7 @@ import { createManageSkillsTui, type ManageSkillsTuiResult } from "./manage-skil
 import { formatUpdateCheckResults, runUpdateCheck } from "./update-check.js";
 import { defaultConfig, formatConfig, readConfig, readState, writeConfig, writeState } from "./state.js";
 import { clearRuntimeCaches } from "./runtime-cache.js";
-import type { CommandResult, InstalledPluginEntry, MarketplacePluginListing, ManagerConfig, Scope, State, UpdateCheckStartupMode } from "./types.js";
+import type { CommandResult, InstalledPluginEntry, MarketplacePluginListing, ManagerConfig, Scope, SkillPolicy, State, UpdateCheckStartupMode } from "./types.js";
 import { hasFlag, parsePluginSpec, pluginKey, splitArgs, withoutFlags } from "./utils.js";
 import { rm } from "node:fs/promises";
 import { collectResourcesFromPluginRoot, readPluginManifest } from "./resources.js";
@@ -236,15 +236,15 @@ export async function handleManageSkillsCommand(pi: ExtensionAPI, rawArgs: strin
 	}
 
 	if (command === "status") {
-		const { skills, sources } = await loadManageSkillsInventory(pi, ctx.cwd);
-		await emit(pi, ctx, formatManageSkillsStatus(skills, sources));
+		const { state, skills, sources } = await loadManageSkillsInventory(pi, ctx.cwd);
+		await emit(pi, ctx, formatManageSkillsStatus(skills, sources, state.skillPolicy, ctx.cwd));
 		return {};
 	}
 
 	if (command === "") {
 		if (ctx.hasUI) return await runManageSkillsTui(pi, ctx);
-		const { skills, sources } = await loadManageSkillsInventory(pi, ctx.cwd);
-		await emit(pi, ctx, `${formatManageSkillsStatus(skills, sources)}\n\nInteractive editing requires Pi TUI mode. Run /manage-skills in an interactive terminal, or use /manage-skills help for details.`);
+		const { state, skills, sources } = await loadManageSkillsInventory(pi, ctx.cwd);
+		await emit(pi, ctx, `${formatManageSkillsStatus(skills, sources, state.skillPolicy, ctx.cwd)}\n\nInteractive editing requires Pi TUI mode. Run /manage-skills in an interactive terminal, or use /manage-skills help for details.`);
 		return {};
 	}
 
@@ -292,25 +292,31 @@ function formatManageSkillsHelp(): string {
 /manage-skills status     # Compact skill policy status
 /manage-skills help       # Show this help
 
-The interactive manager shows a searchable per-skill table with Current/Rule status. Space toggles the selected skill for this folder, Enter opens read-only details, and advanced policy controls live behind the 'a' screen.
+The interactive manager shows a searchable per-skill table with Current/Rule status. Space toggles the selected skill for the current folder only, Enter opens read-only details, and this-folder policy controls live behind the 'a' screen.
+
+Only current-folder skill/source rules affect enablement. Legacy global rules in state are ignored and retained only for compatibility/visibility.
 
 Disabled skills are removed from the model prompt and explicit /skill:<name> invocations are blocked before skill expansion. Manager-owned disabled skills and sources are omitted from resource discovery after /reload; re-enabled resources reappear after /reload.
 
 Non-TUI mode intentionally shows compact status/help instead of printing a full manager.`;
 }
 
-export function formatManageSkillsStatus(skills: SkillInfo[], sources: SkillSourceInfo[]): string {
+export function formatManageSkillsStatus(skills: SkillInfo[], sources: SkillSourceInfo[], policy?: SkillPolicy, cwd?: string): string {
 	const enabledSkills = skills.filter((skill) => skill.enabled).length;
 	const disabledSkills = skills.filter((skill) => !skill.enabled);
 	const disabledSources = sources.filter((source) => !source.enabled);
+	const legacyGlobalRules = policy ? countRules(policy.global) : 0;
 	const lines = ["# Skill policy status", ""];
+	lines.push("Active scope: current folder only; legacy global rules are ignored.");
+	if (cwd) lines.push(`Folder: ${cwd}`);
+	if (legacyGlobalRules > 0) lines.push(`Ignored legacy global rules: ${legacyGlobalRules} (skills ${Object.keys(policy!.global.skills).length}, sources ${Object.keys(policy!.global.sources).length}, names ${Object.keys(policy!.global.names).length}).`);
 	lines.push(`Skills: ${skills.length} total, ${enabledSkills} enabled, ${disabledSkills.length} disabled.`);
 	lines.push(`Sources: ${sources.length} total, ${disabledSources.length} disabled.`);
 	lines.push("");
 	if (disabledSkills.length > 0) {
 		lines.push("Disabled skills:");
 		for (const skill of disabledSkills.slice(0, 10)) {
-			lines.push(`- ${skill.name} (${skill.sourceLabel}) — ${skill.effectiveState} by ${skill.winningScope}/${skill.winningTarget}`);
+			lines.push(`- ${skill.name} (${skill.sourceLabel}) — ${skill.effectiveState} by this-folder/${skill.winningTarget}`);
 		}
 		if (disabledSkills.length > 10) lines.push(`- …and ${disabledSkills.length - 10} more`);
 	} else {
@@ -320,7 +326,7 @@ export function formatManageSkillsStatus(skills: SkillInfo[], sources: SkillSour
 	if (disabledSources.length > 0) {
 		lines.push("Disabled sources:");
 		for (const source of disabledSources.slice(0, 10)) {
-			lines.push(`- ${source.label} (${source.skillCount} skill${source.skillCount === 1 ? "" : "s"}) — ${source.effectiveState} by ${source.winningScope}/${source.winningTarget}`);
+			lines.push(`- ${source.label} (${source.skillCount} skill${source.skillCount === 1 ? "" : "s"}) — ${source.effectiveState} by this-folder/${source.winningTarget}`);
 		}
 		if (disabledSources.length > 10) lines.push(`- …and ${disabledSources.length - 10} more`);
 	} else {
@@ -328,6 +334,10 @@ export function formatManageSkillsStatus(skills: SkillInfo[], sources: SkillSour
 	}
 	lines.push("", "Run /reload after policy changes to refresh manager-owned discovered resources.", "Use /manage-skills help for command help.");
 	return lines.join("\n");
+}
+
+function countRules(rules: SkillPolicy["global"]): number {
+	return Object.keys(rules.skills).length + Object.keys(rules.sources).length + Object.keys(rules.names).length;
 }
 
 function searchablePluginText(plugin: MarketplacePluginListing): string {

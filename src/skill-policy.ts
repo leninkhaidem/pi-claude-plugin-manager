@@ -17,11 +17,12 @@ export type SkillPolicyEffectiveState = {
 	skillKey?: string;
 	sourceKey?: string;
 	nameKey: string;
+	/** Legacy/deprecated global rule state, retained for visibility only. It never affects effectiveState. */
 	globalState: SkillPolicyValue;
 	folderState: FolderSkillPolicyValue;
 	effectiveState: SkillPolicyValue;
 	enabled: boolean;
-	winningScope: "global" | "folder";
+	winningScope: "folder";
 	winningTarget: "default" | "skill" | "source" | "name";
 };
 
@@ -65,21 +66,21 @@ export function isSkillPolicyDisabled(effective: SkillPolicyEffectiveState): boo
 export function evaluateSkillPolicy(policy: SkillPolicy, subject: SkillPolicySubject, startedFolder?: string): SkillPolicyEffectiveState {
 	const normalized = normalizeSkillPolicySubject(subject);
 	const identity = selectSkillPolicyIdentity(normalized);
-	const globalRule = findRule(policy.global, normalized) ?? { state: "enabled" as const, target: "default" as const };
+	const legacyGlobalRule = findRule(policy.global, normalized) ?? { state: "enabled" as const, target: "default" as const };
 	const folderKey = startedFolder ? normalizeStartedFolderKey(startedFolder) : undefined;
 	const folderRule = folderKey ? findRule(policy.folders[folderKey], normalized) : undefined;
-	const effectiveRule = folderRule ?? globalRule;
+	const effectiveRule = folderRule ?? { state: "enabled" as const, target: "default" as const };
 
 	return {
 		identity,
 		skillKey: normalized.path,
 		sourceKey: normalized.sourceRoot,
 		nameKey: normalized.name,
-		globalState: globalRule.state,
+		globalState: legacyGlobalRule.state,
 		folderState: folderRule?.state ?? "inherit",
 		effectiveState: effectiveRule.state,
 		enabled: effectiveRule.state === "enabled",
-		winningScope: folderRule ? "folder" : "global",
+		winningScope: "folder",
 		winningTarget: effectiveRule.target,
 	};
 }
@@ -87,17 +88,17 @@ export function evaluateSkillPolicy(policy: SkillPolicy, subject: SkillPolicySub
 export function evaluateSourcePolicy(policy: SkillPolicy, sourceRoot: string, startedFolder?: string): Omit<SkillPolicyEffectiveState, "identity" | "skillKey" | "nameKey"> & { sourceKey: string } {
 	const sourceKey = normalizePath(sourceRoot);
 	const subject = { name: sourceKey, sourceRoot: sourceKey };
-	const globalRule = findSourceRule(policy.global, sourceKey) ?? { state: "enabled" as const, target: "default" as const };
+	const legacyGlobalRule = findSourceRule(policy.global, sourceKey) ?? { state: "enabled" as const, target: "default" as const };
 	const folderKey = startedFolder ? normalizeStartedFolderKey(startedFolder) : undefined;
 	const folderRule = folderKey ? findSourceRule(policy.folders[folderKey], sourceKey) : undefined;
-	const effectiveRule = folderRule ?? globalRule;
+	const effectiveRule = folderRule ?? { state: "enabled" as const, target: "default" as const };
 	return {
 		sourceKey: subject.sourceRoot,
-		globalState: globalRule.state,
+		globalState: legacyGlobalRule.state,
 		folderState: folderRule?.state ?? "inherit",
 		effectiveState: effectiveRule.state,
 		enabled: effectiveRule.state === "enabled",
-		winningScope: folderRule ? "folder" : "global",
+		winningScope: "folder",
 		winningTarget: effectiveRule.target,
 	};
 }
@@ -164,15 +165,14 @@ function ensureFolderRuleSet(policy: SkillPolicy, startedFolder: string): SkillP
 
 function findRule(rules: SkillPolicyRuleSet | undefined, subject: SkillPolicySubject): { state: SkillPolicyValue; target: "skill" | "source" | "name" } | undefined {
 	if (!rules) return undefined;
-	const sourceRule = subject.sourceRoot ? rules.sources[normalizePath(subject.sourceRoot)] : undefined;
-	if (sourceRule === "disabled") return { state: sourceRule, target: "source" };
 	if (subject.path) {
 		const skillRule = rules.skills[normalizePath(subject.path)];
 		if (skillRule) return { state: skillRule, target: "skill" };
 	}
-	if (sourceRule) return { state: sourceRule, target: "source" };
 	const nameRule = rules.names[subject.name];
 	if (nameRule) return { state: nameRule, target: "name" };
+	const sourceRule = subject.sourceRoot ? rules.sources[normalizePath(subject.sourceRoot)] : undefined;
+	if (sourceRule) return { state: sourceRule, target: "source" };
 	return undefined;
 }
 

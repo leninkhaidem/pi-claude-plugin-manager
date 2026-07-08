@@ -4,8 +4,6 @@ import {
 	evaluateSourcePolicy,
 	setFolderSkillPolicy,
 	setFolderSourcePolicy,
-	setGlobalSkillPolicy,
-	setGlobalSourcePolicy,
 } from "./skill-policy.js";
 import type { SkillInfo, SkillSourceInfo } from "./skills.js";
 import type { FolderSkillPolicyValue, SkillPolicyValue, State } from "./types.js";
@@ -75,7 +73,7 @@ export class ManageSkillsTui implements Component {
 	private descriptionScrollTop = 0;
 	private descriptionWrapWidth = DETAIL_DESCRIPTION_WIDTH_FALLBACK;
 	private rowLimit = TABLE_ROW_LIMIT;
-	private status = "Space toggles this folder. Enter opens details. a opens advanced policy controls.";
+	private status = "Space toggles this folder only. Enter opens details. a opens this-folder policy controls.";
 	private statusKind: StatusKind = "info";
 	private saveError: string | undefined;
 	private hasUnsavedPolicy = false;
@@ -218,7 +216,7 @@ export class ManageSkillsTui implements Component {
 		}
 		if (matchesKey(data, "/")) {
 			this.editingSearch = true;
-			this.setStatus("Search is global: name, description, source, path, and policy state.");
+			this.setStatus("Search spans name, description, source, path, and policy state.");
 			this.invalidateAndRender();
 		}
 	}
@@ -305,12 +303,6 @@ export class ManageSkillsTui implements Component {
 		return this.filteredSkills()[this.selected];
 	}
 
-	private setSkillGlobal(skill: SkillInfo, value: SkillPolicyValue): void {
-		this.applyPolicyChange(`Saved global default: ${skill.name} → ${value}.`, (state) => {
-			setGlobalSkillPolicy(state.skillPolicy, skillSubject(skill), value);
-		});
-	}
-
 	private setSkillFolder(skill: SkillInfo, value: FolderSkillPolicyValue): void {
 		this.applyPolicyChange(`Saved this-folder override: ${skill.name} → ${value}.`, (state) => {
 			setFolderSkillPolicy(state.skillPolicy, this.cwd, skillSubject(skill), value);
@@ -328,12 +320,6 @@ export class ManageSkillsTui implements Component {
 			return;
 		}
 		this.setSkillFolder(skill, "inherit");
-	}
-
-	private setSourceGlobal(skill: SkillInfo, value: SkillPolicyValue): void {
-		this.applyPolicyChange(`Saved source global default: ${skill.sourceLabel} → ${value}.`, (state) => {
-			setGlobalSourcePolicy(state.skillPolicy, skill.sourceRoot, value);
-		});
 	}
 
 	private setSourceFolder(skill: SkillInfo, value: FolderSkillPolicyValue): void {
@@ -423,13 +409,9 @@ export class ManageSkillsTui implements Component {
 	private detailActions(skill: SkillInfo | undefined): DetailAction[] {
 		if (!skill) return [];
 		return [
-			{ label: "Reset this-folder override (inherit)", run: () => this.setSkillFolder(skill, "inherit") },
+			{ label: "Reset this-folder skill override (inherit)", run: () => this.setSkillFolder(skill, "inherit") },
 			{ label: "Enable this skill in this folder", run: () => this.setSkillFolder(skill, "enabled") },
 			{ label: "Disable this skill in this folder", run: () => this.setSkillFolder(skill, "disabled") },
-			{ label: "Set global default: enabled", run: () => this.setSkillGlobal(skill, "enabled") },
-			{ label: "Set global default: disabled", run: () => this.setSkillGlobal(skill, "disabled") },
-			{ label: "Set source globally: enabled", run: () => this.setSourceGlobal(skill, "enabled") },
-			{ label: "Set source globally: disabled", run: () => this.setSourceGlobal(skill, "disabled") },
 			{ label: "Reset source for this folder (inherit)", run: () => this.setSourceFolder(skill, "inherit") },
 			{ label: "Enable source in this folder", run: () => this.setSourceFolder(skill, "enabled") },
 			{ label: "Disable source in this folder", run: () => this.setSourceFolder(skill, "disabled") },
@@ -442,7 +424,8 @@ export class ManageSkillsTui implements Component {
 		this.rowLimit = rowLimitForWidth(width);
 		const header = [
 			centerTitle(this.title("Skill Manager"), width),
-			fit(`Folder: ${this.cwd}`, width),
+			fit(`Folder policy only: ${this.cwd}`, width),
+			...(this.legacyGlobalRuleCount() > 0 ? [fit(`Ignored legacy global rules: ${this.legacyGlobalRuleCount()}`, width)] : []),
 			fit(`Search all ${this.skills.length} skills: ${this.search}${this.editingSearch ? "_" : ""}   ${rows.length}/${this.skills.length} matching`, width),
 		];
 		if (width < WIDE_SPLIT_MIN_WIDTH) {
@@ -483,7 +466,7 @@ export class ManageSkillsTui implements Component {
 			repeatToWidth("─", width),
 		];
 		if (visibleRows.length === 0) {
-			lines.push(fit("No skills match this global search.", width));
+			lines.push(fit("No skills match this inventory search.", width));
 		} else {
 			for (let i = 0; i < visibleRows.length; i++) {
 				lines.push(this.skillTableRow(visibleRows[i]!, this.scrollTop + i === this.selected, width));
@@ -575,7 +558,7 @@ export class ManageSkillsTui implements Component {
 			centerTitle(this.title(`Advanced policy: ${skill.name}`), width),
 			fit(`Current: ${stateText(skill.effectiveState)} • Rule: ${ruleDetails(skill)}`, width),
 			fit(`This folder override: ${folderStateText(skill.folderState)} • Source: ${source?.label ?? skill.sourceLabel}`, width),
-			fit(`Source rule: ${sourceRuleDetails(source)} • Global default: ${stateText(skill.globalState)}`, width),
+			fit(`Source rule: ${sourceRuleDetails(source)}${this.legacyGlobalRuleCount() > 0 ? ` • ignored legacy global rules: ${this.legacyGlobalRuleCount()}` : ""}`, width),
 			repeatToWidth("─", width),
 		];
 		for (let i = 0; i < actions.length; i++) {
@@ -626,6 +609,11 @@ export class ManageSkillsTui implements Component {
 		const moreBefore = this.scrollTop > 0 ? "↑" : " ";
 		const moreAfter = end < total ? "↓" : " ";
 		return fit(`${moreBefore}${moreAfter} ${start}-${end} of ${total} matching skills`, width);
+	}
+
+	private legacyGlobalRuleCount(): number {
+		const global = this.state.skillPolicy.global;
+		return Object.keys(global.skills).length + Object.keys(global.sources).length + Object.keys(global.names).length;
 	}
 
 	private statusLine(width: number): string {
@@ -708,19 +696,18 @@ function currentLabel(skill: SkillInfo): string {
 }
 
 function ruleLabel(skill: SkillInfo): string {
-	if (skill.winningScope === "folder") return "folder";
 	if (skill.winningTarget === "default") return "default";
-	return skill.winningTarget;
+	return `folder ${skill.winningTarget}`;
 }
 
 function ruleDetails(skill: SkillInfo): string {
 	const target = skill.winningTarget === "default" ? "default" : `${skill.winningTarget} rule`;
-	return skill.winningScope === "folder" ? `this folder ${target}` : `global ${target}`;
+	return `this folder ${target}`;
 }
 
 function sourceRuleDetails(source: SkillSourceInfo | undefined): string {
 	if (!source) return "enabled by default";
-	const target = source.winningTarget === "default" ? "default" : `${source.winningScope} source rule`;
+	const target = source.winningTarget === "default" ? "default" : "this-folder source rule";
 	return `${stateText(source.effectiveState)} by ${target}`;
 }
 

@@ -18,7 +18,7 @@ export type SkillInfo = {
 	globalState: SkillPolicyValue;
 	folderState: FolderSkillPolicyValue;
 	effectiveState: SkillPolicyValue;
-	winningScope: "global" | "folder";
+	winningScope: SkillPolicyEffectiveState["winningScope"];
 	winningTarget: SkillPolicyEffectiveState["winningTarget"];
 	identityKind: "path" | "name";
 	identityKey: string;
@@ -35,7 +35,7 @@ export type SkillSourceInfo = {
 	globalState: SkillPolicyValue;
 	folderState: FolderSkillPolicyValue;
 	effectiveState: SkillPolicyValue;
-	winningScope: "global" | "folder";
+	winningScope: SkillPolicyEffectiveState["winningScope"];
 	winningTarget: SkillPolicyEffectiveState["winningTarget"];
 };
 
@@ -474,7 +474,7 @@ export function formatSkillsHelp(): string {
 	return `# /manage-skills — Skill manager
 
 Manage skills from all sources: Pi-native, plugins, and custom directories.
-Toggle individual skills or entire source directories on/off.
+Toggle individual skills or source directories on/off for the current folder only.
 
 ## Commands
 /manage-skills                       # Compact status or interactive manager when available
@@ -499,7 +499,8 @@ This extension also discovers skills from:
   - Custom source directories (see /plugin config set skillSources)
 
 ## Toggling skills
-Toggle individual skills or entire source directories.
+Toggle individual skills or source directories for the current folder only.
+Legacy global skill/source rules in state are ignored.
 Disabled skills are stripped from the system prompt.
 
 /manage-skills                       # Interactive table in TUI-capable builds
